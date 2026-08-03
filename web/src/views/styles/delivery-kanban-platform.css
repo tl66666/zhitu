@@ -1,8 +1,19 @@
 /* ===== 平台数据视图 ===== */
+.content-flex.platform-mode {
+  display: block;
+  width: 100%;
+}
+
+.content-flex.platform-mode .content-main {
+  width: 100%;
+  max-width: none;
+}
+
 .platform-view {
   display: flex;
   flex-direction: column;
   gap: 18px;
+  width: 100%;
 }
 .platform-hero {
   display: grid;

@@ -65,6 +65,9 @@ func (s *LLMService) Transcribe(ctx context.Context, audio io.Reader, filename s
 		return "", fmt.Errorf("new request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
+	// MiMo OpenAI-compatible audio endpoints authenticate with api-key.
+	// Keep Bearer as a compatibility header for other compatible gateways.
+	req.Header.Set("api-key", s.cfg.APIKey)
 	req.Header.Set("Authorization", "Bearer "+s.cfg.APIKey)
 
 	resp, err := s.client.Do(req)
@@ -138,6 +141,9 @@ func (s *LLMService) Synthesize(ctx context.Context, text string) ([]byte, error
 		return nil, fmt.Errorf("new request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
+	// MiMo OpenAI-compatible audio endpoints authenticate with api-key.
+	// Keep Bearer as a compatibility header for other compatible gateways.
+	req.Header.Set("api-key", s.cfg.APIKey)
 	req.Header.Set("Authorization", "Bearer "+s.cfg.APIKey)
 
 	resp, err := s.client.Do(req)

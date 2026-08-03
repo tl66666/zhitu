@@ -7,7 +7,8 @@ import router from '@/router'
 
 // 创建 axios 实例
 const request: AxiosInstance = axios.create({
-  baseURL: import.meta.env.VITE_API_BASE_URL || 'http://localhost:8080',
+  // 开发环境走 vite 代理（/api → :8080），生产环境由 .env 注入绝对 URL
+  baseURL: import.meta.env.DEV ? '' : (import.meta.env.VITE_API_BASE_URL || ''),
   timeout: 30000,
   headers: {
     'Content-Type': 'application/json',

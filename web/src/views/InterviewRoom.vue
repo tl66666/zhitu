@@ -38,6 +38,27 @@ const interviewStore = useInterviewStore()
 
 const simpleImage = Empty.PRESENTED_IMAGE_SIMPLE
 
+const escapeMessageHtml = (content: string): string =>
+  content.replace(/[&<>"']/g, (character) => {
+    const entities: Record<string, string> = {
+      '&': '&amp;',
+      '<': '&lt;',
+      '>': '&gt;',
+      '"': '&quot;',
+      "'": '&#39;',
+    }
+    return entities[character]
+  })
+
+const plainMessageContent = (content: string): string =>
+  content.replace(/\*\*([\s\S]*?)\*\*/g, '$1').replace(/\*\*/g, '')
+
+const renderMessageContent = (content: string): string =>
+  escapeMessageHtml(content)
+    .replace(/\*\*([\s\S]*?)\*\*/g, '<strong>$1</strong>')
+    .replace(/\*\*/g, '')
+    .replace(/\r?\n/g, '<br>')
+
 const interviewId = computed(() => Number(route.params.id))
 
 // 输入与界面状态
@@ -75,8 +96,11 @@ let discardRecordedVoice = false
 // 加载状态
 const reportLoading = ref(false)
 const scoresLoading = ref(false)
-const speakingMessageId = ref<number | null>(null)
-let speechUtterance: SpeechSynthesisUtterance | null = null
+// TTS 播放状态（调后端 xiaomi mimo TTS → blob → <audio> 播放）
+const ttsLoadingId = ref<number | null>(null)
+const playingMessageId = ref<number | null>(null)
+const audioPlayer = ref<HTMLAudioElement | null>(null)
+let ttsObjectUrl: string | null = null
 
 // 发送简历相关状态
 const resumeModalVisible = ref(false)
@@ -109,7 +133,8 @@ const canPlayTts = computed(() => {
 const isTeachingScene = computed(() => interviewStore.currentInterview?.scene === 'teaching')
 const latestQuestion = computed(() => {
   const assistantMessages = interviewStore.messages.filter((item) => item.role === 'assistant')
-  return assistantMessages[assistantMessages.length - 1]?.content || '考官正在准备第一道结构化问题…'
+  const content = assistantMessages[assistantMessages.length - 1]?.content
+  return content ? plainMessageContent(content) : '考官正在准备第一道结构化问题…'
 })
 const currentTeachingPhase = computed(() => {
   const no = interviewStore.currentInterview?.current_question_no || 1
@@ -446,7 +471,21 @@ const handleSendAnswer = async () => {
   const content = inputText.value.trim()
   if (!content) return
   inputText.value = ''
-  await interviewStore.sendMessage(interviewId.value, content)
+  // 等待 DOM 更新完成，避免 a-textarea 在 disabled 状态变化时把旧值同步回 inputText
+  await nextTick()
+  try {
+    await interviewStore.sendMessage(interviewId.value, content)
+  } finally {
+    inputText.value = ''
+  }
+}
+
+// 中文、日文等输入法确认候选词时也会触发 Enter。
+// 组合输入期间必须交给 IME 处理，只有普通 Enter 才发送回答。
+const handleAnswerKeydown = (event: KeyboardEvent) => {
+  if (event.isComposing || event.keyCode === 229) return
+  event.preventDefault()
+  void handleSendAnswer()
 }
 
 // ============ 麦克风录音回答 ============
@@ -727,65 +766,65 @@ const rerecordVoice = async () => {
   await startVoiceRecording()
 }
 
-// TTS 播放
+// TTS 播放（调后端 xiaomi mimo TTS）
 const stopTtsPlayback = () => {
-  if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
-    window.speechSynthesis.cancel()
+  const player = audioPlayer.value
+  if (player) {
+    player.pause()
+    player.onended = null
+    player.onerror = null
+    player.removeAttribute('src')
+    player.load()
   }
-  speechUtterance = null
-  speakingMessageId.value = null
+  if (ttsObjectUrl) {
+    URL.revokeObjectURL(ttsObjectUrl)
+    ttsObjectUrl = null
+  }
+  playingMessageId.value = null
 }
 
-const handlePlayTts = (msg: InterviewMessage) => {
-  if (speakingMessageId.value === msg.id) {
+const handlePlayTts = async (msg: InterviewMessage) => {
+  // 同一题 → 停止
+  if (playingMessageId.value === msg.id) {
     stopTtsPlayback()
     return
   }
-  if (
-    typeof window === 'undefined' ||
-    !('speechSynthesis' in window) ||
-    typeof SpeechSynthesisUtterance === 'undefined'
-  ) {
-    message.error('当前浏览器不支持语音朗读，请使用最新版 Chrome、Edge 或 Safari')
+  // 正在合成别的 → 拒绝并发
+  if (ttsLoadingId.value !== null) {
+    message.warning('正在合成上一题语音，请稍候')
     return
   }
-
-  const text = msg.content.trim()
-  if (!text) {
-    message.warning('当前问题没有可朗读的内容')
-    return
-  }
+  const player = audioPlayer.value
+  if (!player) return
 
   stopTtsPlayback()
-
-  const utterance = new SpeechSynthesisUtterance(text)
-  utterance.lang = 'zh-CN'
-  utterance.rate = 0.95
-  utterance.pitch = 1
-  utterance.volume = 1
-
-  const voices = window.speechSynthesis.getVoices()
-  utterance.voice =
-    voices.find((voice) => voice.lang.toLowerCase() === 'zh-cn') ||
-    voices.find((voice) => voice.lang.toLowerCase().startsWith('zh')) ||
-    null
-
-  const resetPlaybackState = () => {
-    if (speechUtterance !== utterance) return
-    speechUtterance = null
-    speakingMessageId.value = null
-  }
-  utterance.onend = resetPlaybackState
-  utterance.onerror = (event) => {
-    resetPlaybackState()
-    if (event.error !== 'canceled' && event.error !== 'interrupted') {
-      message.error('语音朗读失败，请稍后重试')
+  ttsLoadingId.value = msg.id
+  try {
+    const url = await interviewStore.playTts(interviewId.value, msg.id)
+    if (!url) return
+    // 合成期间用户切到别的题 → 释放这次 URL
+    if (ttsLoadingId.value !== msg.id) {
+      URL.revokeObjectURL(url)
+      return
     }
+    ttsObjectUrl = url
+    player.src = url
+    player.onended = () => {
+      stopTtsPlayback()
+    }
+    player.onerror = () => {
+      message.error('音频播放失败')
+      stopTtsPlayback()
+    }
+    await player.play()
+    playingMessageId.value = msg.id
+  } catch (error) {
+    console.error('TTS 合成失败:', error)
+    stopTtsPlayback()
+    message.error('音频合成失败，请稍后重试')
+  } finally {
+    if (ttsLoadingId.value === msg.id) ttsLoadingId.value = null
   }
-
-  speechUtterance = utterance
-  speakingMessageId.value = msg.id
-  window.speechSynthesis.speak(utterance)
 }
 
 onBeforeUnmount(() => {

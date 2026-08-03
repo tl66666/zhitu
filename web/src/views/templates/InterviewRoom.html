@@ -110,15 +110,15 @@
                       v-if="canPlayTts && msg.role === 'assistant'"
                       type="link"
                       size="small"
+                      :loading="ttsLoadingId === msg.id"
+                      :disabled="ttsLoadingId !== null && ttsLoadingId !== msg.id"
                       @click="handlePlayTts(msg)"
                     >
                       <SoundOutlined />
-                      {{ speakingMessageId === msg.id ? '停止' : '播放' }}
+                      {{ playingMessageId === msg.id ? '停止' : '播放' }}
                     </a-button>
                   </div>
-                  <div class="msg-bubble">
-                    {{ msg.content }}
-                  </div>
+                  <div class="msg-bubble" v-html="renderMessageContent(msg.content)"></div>
                   <div class="msg-time">{{ formatTime(msg.created_at) }}</div>
                 </div>
               </div>
@@ -134,7 +134,7 @@
                     <a-spin :spinning="interviewStore.sending" size="small" />
                   </div>
                   <div class="msg-bubble streaming-bubble">
-                    {{ interviewStore.streamingText }}
+                    <span v-html="renderMessageContent(interviewStore.streamingText)"></span>
                     <span class="cursor-blink">|</span>
                   </div>
                 </div>
@@ -148,7 +148,7 @@
                 :rows="3"
                 :placeholder="audioDraft ? '录音已作为音频文件加入，可转成文字后编辑' : '输入你的回答...'"
                 :disabled="interviewStore.sending || isRecording || voicePreparing || recordingFinalizing || !!audioDraft"
-                @keydown.enter.exact.prevent="handleSendAnswer"
+                @keydown.enter.exact="handleAnswerKeydown"
               />
               <div v-if="audioDraft" class="audio-draft-card">
                 <div class="audio-draft-main">
@@ -451,6 +451,13 @@
         </a-col>
       </a-row>
     </a-spin>
+
+    <!-- TTS 播放器（不可见）：调后端 xiaomi mimo TTS 拿到的 blob 音频 -->
+    <audio
+      ref="audioPlayer"
+      class="hidden-audio"
+      preload="none"
+    ></audio>
 
     <!-- 发送简历弹窗：选择简历 + 版本 -->
     <a-modal

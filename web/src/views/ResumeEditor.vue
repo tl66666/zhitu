@@ -454,7 +454,28 @@ const handleSaveVersion = async () => {
 const previewNavigate = (target: 'interview' | 'delivery') => {
   message.info(target === 'interview' ? '面试训练场将在下一阶段完善' : '投递看板将在下一阶段完善')
 }
-const exportResume = () => window.print()
+const printAncestorClass = 'resume-print-ancestor'
+const prepareResumePrint = () => {
+  const paper = document.getElementById('resume-paper')
+  if (!paper) return
+
+  document.body.classList.add('resume-printing')
+  let ancestor = paper.parentElement
+  while (ancestor && ancestor !== document.body) {
+    ancestor.classList.add(printAncestorClass)
+    ancestor = ancestor.parentElement
+  }
+}
+const cleanupResumePrint = () => {
+  document.body.classList.remove('resume-printing')
+  document.querySelectorAll(`.${printAncestorClass}`).forEach((element) => {
+    element.classList.remove(printAncestorClass)
+  })
+}
+const exportResume = () => {
+  prepareResumePrint()
+  window.print()
+}
 const backToList = () => demoMode.value ? router.push('/') : router.push('/app/resumes')
 const formatVersionDate = (value: string) => value ? new Date(value).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) : ''
 
@@ -473,6 +494,8 @@ const syncFromUserProfile = () => {
 onMounted(async () => {
   document.documentElement.classList.add('resume-editor-scroll-lock')
   document.body.classList.add('resume-editor-scroll-lock')
+  window.addEventListener('beforeprint', prepareResumePrint)
+  window.addEventListener('afterprint', cleanupResumePrint)
 
   if (demoMode.value) return
   if (!resumeId.value || Number.isNaN(resumeId.value)) return router.push('/app/resumes')
@@ -486,6 +509,9 @@ onMounted(async () => {
 })
 
 onBeforeUnmount(() => {
+  window.removeEventListener('beforeprint', prepareResumePrint)
+  window.removeEventListener('afterprint', cleanupResumePrint)
+  cleanupResumePrint()
   document.documentElement.classList.remove('resume-editor-scroll-lock')
   document.body.classList.remove('resume-editor-scroll-lock')
 })

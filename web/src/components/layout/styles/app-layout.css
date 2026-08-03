@@ -96,18 +96,30 @@
   font-weight: 500;
   color: var(--sidebar-foreground);
   margin: 0 0 4px 0;
-  transition: background-color 0.18s ease, color 0.18s ease;
+  transform-origin: center;
+  transition:
+    background-color 0.18s ease,
+    color 0.18s ease,
+    box-shadow 0.18s ease,
+    transform 0.18s ease;
 }
 
 .app-sider :deep(.ant-menu-item:hover) {
   background: var(--sidebar-accent);
   color: var(--sidebar-foreground);
+  transform: translateY(-1px);
+  box-shadow: 0 5px 14px rgba(21, 26, 35, 0.1);
+}
+
+.app-sider :deep(.ant-menu-item:active) {
+  transform: scale(0.97);
+  box-shadow: 0 2px 7px rgba(21, 26, 35, 0.08);
 }
 
 .app-sider :deep(.ant-menu-item-selected) {
   background: rgba(255, 255, 255, 0.66) !important;
   color: var(--primary) !important;
-  box-shadow: none;
+  box-shadow: 0 4px 12px rgba(21, 26, 35, 0.09);
 }
 
 .app-sider :deep(.ant-menu-item-selected::after) {
@@ -116,6 +128,27 @@
 
 .app-sider :deep(.ant-menu-item .anticon) {
   font-size: 18px;
+}
+
+/* 折叠状态：固定按钮尺寸并以侧栏中线为轴，避免动效与阴影偏向一侧 */
+.app-sider.ant-layout-sider-collapsed :deep(.ant-menu-inline-collapsed > .ant-menu-item) {
+  width: 48px;
+  height: 48px;
+  min-height: 48px;
+  margin: 0 auto 4px;
+  padding-inline: 0 !important;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.app-sider.ant-layout-sider-collapsed :deep(.ant-menu-item .ant-menu-item-icon) {
+  margin: 0;
+  line-height: 1;
+}
+
+.app-sider.ant-layout-sider-collapsed :deep(.ant-menu-item .ant-menu-title-content) {
+  display: none;
 }
 
 /* ===== 自定义折叠按钮（仿菜单项样式） ===== */

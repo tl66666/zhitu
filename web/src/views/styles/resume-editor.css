@@ -342,4 +342,58 @@
   .stage-meta span:last-child { display: none; }
 }
 @media (max-height: 680px) and (min-width: 821px) { .lab-toolbar { height: 54px; padding-inline: 14px; } .lab-workspace { height: calc(100% - 54px); } .panel-tabs { height: 44px; } .editor-scroll { height: calc(100% - 44px); } }
-@media print { .product-sidebar, .lab-toolbar, .editor-panel, .stage-meta { display: none !important; } .resume-shell, .resume-lab, .lab-workspace, .preview-stage, .paper-viewport { display: block; height: auto; overflow: visible; background: #fff; padding: 0; } .resume-paper { transform: none !important; box-shadow: none; margin: 0; width: 210mm; min-height: 297mm; } }
+@media print {
+  @page { size: A4 portrait; margin: 0; }
+
+  :global(html),
+  :global(body.resume-printing) {
+    width: 210mm !important;
+    min-width: 210mm !important;
+    height: auto !important;
+    min-height: 297mm !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    overflow: visible !important;
+    background: #fff !important;
+  }
+
+  :global(body.resume-printing *:not(.resume-print-ancestor):not(#resume-paper):not(#resume-paper *)) {
+    display: none !important;
+  }
+
+  :global(body.resume-printing .resume-print-ancestor) {
+    display: block !important;
+    position: static !important;
+    box-sizing: border-box !important;
+    width: auto !important;
+    min-width: 0 !important;
+    height: auto !important;
+    min-height: 0 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    overflow: visible !important;
+    transform: none !important;
+    border: 0 !important;
+    border-radius: 0 !important;
+    box-shadow: none !important;
+  }
+
+  :global(body.resume-printing #resume-paper) {
+    display: block !important;
+    position: static !important;
+    box-sizing: border-box !important;
+    width: 210mm !important;
+    min-height: 297mm !important;
+    margin: 0 !important;
+    padding: 14mm 16mm !important;
+    overflow: visible !important;
+    transform: none !important;
+    zoom: 1 !important;
+    border: 0 !important;
+    border-radius: 0 !important;
+    box-shadow: none !important;
+    background: #fff !important;
+    print-color-adjust: exact;
+    -webkit-print-color-adjust: exact;
+  }
+}
