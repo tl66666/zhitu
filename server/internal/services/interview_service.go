@@ -3,19 +3,24 @@ package services
 import (
 	"context"
 	"errors"
-	"fmt"
 	"github.com/zhitu/server/internal/config"
 	"github.com/zhitu/server/internal/models"
 	"gorm.io/gorm"
-	"time"
+	"strings"
 )
 
 // 面试相关错误
 var (
-	ErrInterviewNotFound = errors.New("interview not found")
-	ErrInterviewEnded    = errors.New("interview already ended")
-	ErrMessageNotFound   = errors.New("interview message not found")
-	ErrReportNotReady    = errors.New("report not generated yet, please end the interview first")
+	ErrInterviewNotFound  = errors.New("interview not found")
+	ErrInterviewEnded     = errors.New("interview already ended")
+	ErrInterviewPreparing = errors.New("interview is still preparing")
+	ErrResumeRequired     = errors.New("resume is required before starting the interview")
+	ErrTargetJDRequired   = errors.New("target_jd is required")
+	ErrResumeLocked       = errors.New("resume is locked for this interview")
+	ErrInvalidMode        = errors.New("invalid interview mode")
+	ErrModeNotAllowed     = errors.New("this response mode is not allowed for the interview")
+	ErrMessageNotFound    = errors.New("interview message not found")
+	ErrReportNotReady     = errors.New("report not generated yet, please end the interview first")
 )
 
 // 面试场景枚举
@@ -47,6 +52,7 @@ var validInterviewScenes = map[string]struct{}{
 // 面试状态枚举
 const (
 	StatusOngoing   = "ongoing"
+	StatusPreparing = "preparing"
 	StatusCompleted = "completed"
 	StatusCancelled = "cancelled"
 )
@@ -57,6 +63,8 @@ const (
 	ModeVoice  = "voice"
 	ModeHybrid = "hybrid"
 )
+
+var validInterviewModes = map[string]struct{}{ModeText: {}, ModeVoice: {}, ModeHybrid: {}}
 
 const (
 	maxResumePromptRunes   = 12000
@@ -81,10 +89,14 @@ type CreateInterviewInput struct {
 	Scene          string `json:"scene" binding:"required"`
 	TargetCompany  string `json:"target_company"`
 	TargetPosition string `json:"target_position" binding:"required"`
-	TargetJD       string `json:"target_jd"`
+	TargetJD       string `json:"target_jd" binding:"required"`
+	ResumeID       uint   `json:"resume_id" binding:"required"`
+	VersionID      uint   `json:"version_id"`
 	Difficulty     string `json:"difficulty"`
 	TotalQuestions int    `json:"total_questions"`
 	Mode           string `json:"mode"`
+	ExaminerStyle  string `json:"examiner_style"`
+	TrainingFocus  string `json:"training_focus"`
 }
 
 // AttachResumeInput 面试发送简历入参
@@ -93,8 +105,7 @@ type AttachResumeInput struct {
 	VersionID uint `json:"version_id"` // 可选，不传则用简历当前版本
 }
 
-// Create 创建面试会话，并写入一道无需大模型的开场题。
-// 大模型只在用户开始作答后参与后续追问，不阻塞进入面试房间。
+// Create 创建面试准备会话。首题由 Start 在简历和 JD 已固化后生成。
 func (s *InterviewService) Create(ctx context.Context, userID uint, in *CreateInterviewInput) (*models.Interview, error) {
 	if _, ok := validInterviewScenes[in.Scene]; !ok {
 		return nil, errors.New("invalid interview scene")
@@ -109,35 +120,42 @@ func (s *InterviewService) Create(ctx context.Context, userID uint, in *CreateIn
 		return nil, errors.New("total_questions must be between 5 and 15")
 	}
 	if in.Mode == "" {
-		in.Mode = ModeText
+		in.Mode = ModeHybrid
+	}
+	if _, ok := validInterviewModes[in.Mode]; !ok {
+		return nil, ErrInvalidMode
+	}
+	if strings.TrimSpace(in.TargetJD) == "" {
+		return nil, ErrTargetJDRequired
+	}
+	if in.ResumeID == 0 {
+		return nil, ErrResumeRequired
+	}
+	resume, version, err := s.loadResumeSnapshot(userID, in.ResumeID, in.VersionID)
+	if err != nil {
+		return nil, err
 	}
 
-	now := time.Now()
 	interview := &models.Interview{
 		UserID:            userID,
 		Scene:             in.Scene,
 		TargetCompany:     in.TargetCompany,
 		TargetPosition:    in.TargetPosition,
-		TargetJD:          in.TargetJD,
+		TargetJD:          strings.TrimSpace(in.TargetJD),
+		ResumeID:          resume.ID,
+		ResumeVersionID:   version.ID,
+		ResumeSnapshot:    version.Content,
+		ResumeName:        resume.Name,
 		Difficulty:        in.Difficulty,
 		TotalQuestions:    in.TotalQuestions,
 		Mode:              in.Mode,
-		Status:            StatusOngoing,
-		CurrentQuestionNo: 1,
-		StartedAt:         &now,
+		ExaminerStyle:     strings.TrimSpace(in.ExaminerStyle),
+		TrainingFocus:     strings.TrimSpace(in.TrainingFocus),
+		Status:            StatusPreparing,
+		CurrentQuestionNo: 0,
 	}
 	if err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		if err := tx.Create(interview).Error; err != nil {
-			return err
-		}
-		firstQuestion := &models.InterviewMessage{
-			InterviewID:  interview.ID,
-			Role:         "assistant",
-			Content:      openingQuestion(interview),
-			QuestionType: "opening",
-			QuestionNo:   1,
-		}
-		return tx.Create(firstQuestion).Error
+		return tx.Create(interview).Error
 	}); err != nil {
 		return nil, err
 	}
@@ -145,25 +163,48 @@ func (s *InterviewService) Create(ctx context.Context, userID uint, in *CreateIn
 	return interview, nil
 }
 
-func openingQuestion(interview *models.Interview) string {
-	questions := map[string]string{
-		SceneTeaching:  "欢迎进入模拟教室。请面向考官做一段简短的自我介绍，并说明你对%s课堂教学的理解。",
-		SceneCorporate: "欢迎进入企业会议室。请简要介绍自己，并选择一段最能证明你胜任%s的经历。",
-		SceneGroup:     "欢迎进入群面讨论室。请用一分钟陈述你对讨论目标的理解，以及你准备承担的团队角色。",
-		SceneDefense:   "欢迎进入项目答辩室。请先概述与你申请的%s最相关的项目背景、职责和成果。",
-		SceneClient:    "欢迎进入客户会议室。假设客户首次与你见面，请围绕%s做一段简洁、有说服力的价值介绍。",
-		ScenePressure:  "欢迎进入压力面试室。请直面回答：与其他候选人相比，我们为什么应该选择你担任%s？",
-		ScenePublic:    "欢迎进入结构化面试厅。请结合%s的职责，谈谈你如何看待服务意识与执行能力。",
-		SceneMedical:   "欢迎进入医疗面试室。请结合%s岗位，说明你如何兼顾专业判断、患者感受与沟通效率。",
-		SceneMedia:     "欢迎进入媒体演播室。请面向镜头完成一分钟自我介绍，并说明你应聘%s的核心优势。",
-		SceneRemote:    "欢迎进入远程面试间。请用清晰简洁的方式介绍自己，并说明你胜任%s和远程协作的优势。",
-		SceneSystem:    "欢迎进入系统设计室。请先说明你在%s相关工作中如何进行需求澄清与技术方案取舍。",
-		SceneAviation:  "欢迎进入航空面试厅。请结合%s岗位，介绍一次你主动提供优质服务或处理突发情况的经历。",
+func (s *InterviewService) loadResumeSnapshot(userID, resumeID, versionID uint) (*models.Resume, *models.ResumeVersion, error) {
+	var resume models.Resume
+	if err := s.db.Where("id = ? AND user_id = ?", resumeID, userID).First(&resume).Error; errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, nil, ErrResumeNotFound
+	} else if err != nil {
+		return nil, nil, err
 	}
-	if question, ok := questions[interview.Scene]; ok {
-		return fmt.Sprintf(question, interview.TargetPosition)
+	if versionID == 0 {
+		versionID = resume.CurrentVersionID
 	}
-	return fmt.Sprintf("欢迎参加本次面试。请先做一段简短的自我介绍，并说明你与%s岗位的匹配之处。", interview.TargetPosition)
+	if versionID == 0 {
+		return nil, nil, ErrVersionNotFound
+	}
+	var version models.ResumeVersion
+	if err := s.db.Where("id = ? AND resume_id = ?", versionID, resumeID).First(&version).Error; errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, nil, ErrVersionNotFound
+	} else if err != nil {
+		return nil, nil, err
+	}
+	if strings.TrimSpace(version.Content) == "" {
+		return nil, nil, errors.New("resume version content is empty")
+	}
+	return &resume, &version, nil
+}
+
+// SetMode updates the active interaction mode without resetting the conversation.
+func (s *InterviewService) SetMode(userID, interviewID uint, mode string) (*models.Interview, error) {
+	if _, ok := validInterviewModes[mode]; !ok {
+		return nil, ErrInvalidMode
+	}
+	interview, err := s.Get(userID, interviewID)
+	if err != nil {
+		return nil, err
+	}
+	if interview.Status != StatusPreparing && interview.Status != StatusOngoing {
+		return nil, ErrInterviewEnded
+	}
+	if err := s.db.Model(interview).Update("mode", mode).Error; err != nil {
+		return nil, err
+	}
+	interview.Mode = mode
+	return interview, nil
 }
 
 // Get 获取面试详情（含所有消息）

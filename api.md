@@ -661,25 +661,57 @@ POST /api/v1/interviews
   "scene": "tech",                  // 必填，见枚举
   "target_company": "字节跳动",
   "target_position": "后端开发",      // 必填
-  "target_jd": "岗位描述...",
-  "difficulty": "medium",           // 可空
-  "total_questions": 5,             // 可空，默认 5
-  "mode": "text"                    // 可空，text/voice/hybrid，默认 text
+  "target_jd": "岗位描述...",         // 必填，面试官据此设题
+  "resume_id": 12,                    // 必填，创建前选择简历
+  "version_id": 34,                   // 可空，缺省使用该简历当前版本
+  "difficulty": "mid",               // 可空，junior/mid/senior/mixed，默认 mid
+  "total_questions": 5,              // 可空，5-15，默认 8
+  "mode": "hybrid",                 // 可空，text/voice/hybrid，默认 hybrid
+  "examiner_style": "追问深入",      // 可空
+  "training_focus": "项目深挖"       // 可空
 }
 ```
 
-**scene 枚举**：`tech`(技术) / `behavior`(行为) / `pressure`(压力) / `hr`(HR) / `group`(群面)
+**scene 枚举**：`tech` / `behavior` / `pressure` / `hr` / `group` / `teaching` / `corporate` / `defense` / `client` / `public` / `medical` / `media` / `remote` / `system` / `aviation`
 
-**mode 枚举**：`text`(纯文字) / `voice`(语音) / `hybrid`(系统语音+用户文字)
+**mode 枚举**：`text`(纯文字打字) / `voice`(语音面对面，不展示文字输入框) / `hybrid`(默认语音输入、AI 自动播放语音，也可切换键盘输入)
 
-- 创建后自动生成第一道题（AI 发问）
-- 面试状态初始为 `ongoing`
+- 创建时校验并固化所选简历版本快照与 JD，面试状态初始为 `preparing`，不会提前生成题目。
+- 创建成功后调用 `POST /api/v1/interviews/:id/start`，生成基于 JD 和简历的第一道题并进入 `ongoing`。
 
-**响应 data**：interview 对象，含首条 AI 提问消息。
+**响应 data**：interview 对象。首题通过 `start` SSE 的 `started` 事件返回。
 
 ---
 
-### 5.2 列表
+### 5.2 启动面试并生成首题（SSE）
+
+```
+POST /api/v1/interviews/:id/start
+```
+
+面试房间进入时调用。接口幂等，重复调用不会重复生成首题。
+
+**响应事件**：
+
+```json
+{"type":"delta","content":"AI 提问片段..."}
+{"type":"started","message":{ /* 首条 AI 提问 */ },"interview":{ /* ongoing 会话 */ }}
+{"type":"error","message":"错误信息"}
+```
+
+首题 Prompt 同时包含创建时固化的 JD、简历快照和训练设置。
+
+### 5.3 切换面试模式
+
+```
+PATCH /api/v1/interviews/:id/mode
+```
+
+**请求体**：`{"mode":"text"}`
+
+可在 `preparing` 或 `ongoing` 状态下自由切换 `text / voice / hybrid`，不会重置已有对话。
+
+### 5.4 列表
 
 ```
 GET /api/v1/interviews
@@ -689,7 +721,7 @@ GET /api/v1/interviews
 
 ---
 
-### 5.3 获取面试详情
+### 5.5 获取面试详情
 
 ```
 GET /api/v1/interviews/:id
@@ -706,7 +738,7 @@ GET /api/v1/interviews/:id
 
 ---
 
-### 5.4 发送文字回答（SSE 流式）
+### 5.6 发送文字回答（SSE 流式）
 
 ```
 POST /api/v1/interviews/:id/messages
@@ -732,17 +764,17 @@ POST /api/v1/interviews/:id/messages
 ```
 
 - AI 回复完成后，若已达 `total_questions` 题数，面试自动结束并推送 `interview_ended` 事件
-- 面试状态非 `ongoing` 时返回 400
+- 仅 `text` 和 `hybrid` 模式允许文字回答；`preparing` 状态需先调用 `start`。
 
 ---
 
-### 5.5 发送语音回答（SSE 流式）
+### 5.7 发送语音回答（SSE 流式）
 
 ```
 POST /api/v1/interviews/:id/voice
 ```
 
-**请求**：`multipart/form-data`，字段 `audio` 为音频文件
+**请求**：`multipart/form-data`，字段 `audio` 为音频文件，`duration_sec` 为录音时长（可选）
 
 | 字段   | 类型 | 必填 | 校验规则                                          |
 |-------|------|------|--------------------------------------------------|
@@ -760,32 +792,33 @@ POST /api/v1/interviews/:id/voice
 {"type": "error", "message": "错误信息"}
 ```
 
-- 流程：上传音频 → Whisper 转写为文字 → 作为用户回答 → AI 流式回复
+- 流程：录音结束后自动上传 → Whisper 转写 → 立即作为用户回答 → AI 流式回复。不会返回录音草稿，也不需要用户确认“转文字”或重录。
+- 仅 `voice` 和 `hybrid` 模式允许语音回答。
 - 依赖 LLM 的 Whisper 模型配置
 
 ---
 
-### 5.6 获取 AI 提问的 TTS 音频
+### 5.8 获取 AI 提问的 TTS 音频
 
 ```
 GET /api/v1/interviews/:id/tts/:msgId
 ```
 
-- 仅 `mode=voice/hybrid` 的面试中，AI 提问消息才生成 TTS
+- `voice/hybrid` 模式的前端会在收到 AI 文字后自动请求并播放 TTS；语音模式下文字仅作为状态数据，不展示文字输入框。
 - 首次请求时懒生成并缓存到本地文件，后续直接返回缓存
 
 **响应**：二进制音频流
 
 ```
-Content-Type: audio/mpeg
-Content-Disposition: inline; filename="tts_xxx.mp3"
+Content-Type: audio/wav
+Content-Disposition: inline; filename="tts_xxx.wav"
 ```
 
 - 依赖 LLM 的 TTS 模型配置
 
 ---
 
-### 5.7 结束面试并生成复盘
+### 5.9 结束面试并生成复盘
 
 ```
 POST /api/v1/interviews/:id/end
@@ -798,7 +831,7 @@ POST /api/v1/interviews/:id/end
 
 ---
 
-### 5.8 获取复盘报告
+### 5.10 获取复盘报告
 
 ```
 GET /api/v1/interviews/:id/report
@@ -808,7 +841,7 @@ GET /api/v1/interviews/:id/report
 
 ---
 
-### 5.9 获取评分明细
+### 5.11 获取评分明细
 
 ```
 GET /api/v1/interviews/:id/scores

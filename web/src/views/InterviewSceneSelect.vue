@@ -47,6 +47,45 @@
             <span>约 {{ selectedSceneData.duration }} 分钟</span>
           </div>
 
+          <div class="source-grid">
+            <label>
+              <span>本次简历</span>
+              <a-select
+                v-model:value="form.resumeId"
+                placeholder="请选择本次面试使用的简历"
+                :loading="loadingResumes"
+                @change="onResumeChange"
+              >
+                <a-select-option v-for="resume in resumes" :key="resume.id" :value="resume.id">
+                  {{ resume.name }}
+                </a-select-option>
+              </a-select>
+            </label>
+            <label>
+              <span>简历版本</span>
+              <a-select
+                v-model:value="form.versionId"
+                placeholder="使用当前版本"
+                :loading="loadingVersions"
+                :disabled="!form.resumeId"
+              >
+                <a-select-option :value="0">当前版本</a-select-option>
+                <a-select-option v-for="version in versions" :key="version.id" :value="version.id">
+                  {{ version.version_label }}
+                </a-select-option>
+              </a-select>
+            </label>
+          </div>
+
+          <label class="jd-field">
+            <span>目标 JD <b>必填</b></span>
+            <a-textarea
+              v-model:value="form.targetJd"
+              :rows="5"
+              placeholder="粘贴目标岗位 JD，面试官将根据 JD 与简历设计问题"
+            />
+          </label>
+
           <div class="field-grid">
             <label>
               <span>训练方向</span>
@@ -80,6 +119,14 @@
                 <a-select-option value="连续追问">连续追问</a-select-option>
               </a-select>
             </label>
+            <label>
+              <span>面试模式</span>
+              <a-radio-group v-model:value="form.mode" button-style="solid">
+                <a-radio-button value="text">文字</a-radio-button>
+                <a-radio-button value="voice">语音</a-radio-button>
+                <a-radio-button value="hybrid">混合</a-radio-button>
+              </a-radio-group>
+            </label>
           </div>
 
           <label class="topic-field">
@@ -93,7 +140,7 @@
             </span>
           </div>
 
-          <button class="enter-button" :disabled="creating" @click="createInterview">
+          <button class="enter-button" :disabled="creating || !canCreate" @click="createInterview">
             <LoadingOutlined v-if="creating" />
             <PlayCircleOutlined v-else />
             {{ creating ? '正在布置考场' : `进入${selectedSceneData.title}` }}
@@ -105,12 +152,13 @@
 </template>
 
 <script setup lang="ts">
-import { computed, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { PlayCircleOutlined, LoadingOutlined } from '@ant-design/icons-vue'
 import { message } from 'ant-design-vue'
 import { useInterviewStore } from '@/stores/interview'
-import type { InterviewDifficulty, InterviewScene } from '@/types/models'
+import { listResumes, listVersions } from '@/api/resume'
+import type { InterviewDifficulty, InterviewMode, InterviewScene, Resume, ResumeVersion } from '@/types/models'
 
 interface SceneConfig {
   key: InterviewScene
@@ -137,13 +185,27 @@ const form = reactive<{
   difficulty: InterviewDifficulty
   examinerStyle: string
   topic: string
+  targetJd: string
+  resumeId: number | null
+  versionId: number
+  mode: InterviewMode
 }>({
   direction: '教师资格证面试',
   targetPosition: '小学语文教师',
   difficulty: 'mid',
   examinerStyle: '标准规范',
   topic: '',
+  targetJd: '',
+  resumeId: null,
+  versionId: 0,
+  mode: 'hybrid',
 })
+
+const resumes = ref<Resume[]>([])
+const versions = ref<ResumeVersion[]>([])
+const loadingResumes = ref(false)
+const loadingVersions = ref(false)
+const canCreate = computed(() => Boolean(form.resumeId && form.targetJd.trim()))
 
 const scenes: SceneConfig[] = [
   { key: 'teaching', no: '01', title: '模拟教室', subtitle: '教资面试 · 试讲 · 答辩', position: '0% 0%', description: '面对考官完成结构化问答、试讲与答辩。', duration: 15, directions: ['教师资格证面试', '教师招聘试讲', '说课训练'], defaultPosition: '小学语文教师', positionPlaceholder: '例如：小学语文教师', topicPlaceholder: '例如：《荷花》第二课时', steps: ['结构化问答', '模拟试讲', '考官答辩'] },
@@ -171,19 +233,72 @@ const selectScene = (sceneKey: InterviewScene) => {
   form.topic = ''
 }
 
+const loadVersions = async (resumeId: number) => {
+  loadingVersions.value = true
+  try {
+    const response = await listVersions(resumeId)
+    versions.value = response.data.data || []
+  } catch (error) {
+    console.error('加载简历版本失败:', error)
+    versions.value = []
+  } finally {
+    loadingVersions.value = false
+  }
+}
+
+const onResumeChange = async (resumeId: number) => {
+  form.versionId = 0
+  versions.value = []
+  const resume = resumes.value.find((item) => item.id === resumeId)
+  if (resume) {
+    form.targetJd = resume.target_jd || form.targetJd
+    form.targetPosition = resume.target_position || form.targetPosition
+  }
+  await loadVersions(resumeId)
+}
+
+const loadResumes = async () => {
+  loadingResumes.value = true
+  try {
+    const response = await listResumes()
+    resumes.value = response.data.data || []
+    if (resumes.value.length > 0 && !form.resumeId) {
+      form.resumeId = resumes.value[0].id
+      await onResumeChange(form.resumeId)
+    }
+  } catch (error) {
+    console.error('加载简历列表失败:', error)
+    message.error('加载简历列表失败')
+  } finally {
+    loadingResumes.value = false
+  }
+}
+
 const createInterview = async () => {
   creating.value = true
   try {
+    if (!form.resumeId) {
+      message.warning('请先选择本次面试使用的简历')
+      return
+    }
+    if (!form.targetJd.trim()) {
+      message.warning('请先填写目标 JD')
+      return
+    }
     const topic = form.topic.trim() || '按场景默认重点进行'
     const scene = selectedSceneData.value
     const interview = await interviewStore.create({
       scene: scene.key,
-      target_company: form.direction,
+      target_company: '',
       target_position: form.targetPosition.trim() || scene.defaultPosition,
-      target_jd: `场景：${scene.title}\n训练方向：${form.direction}\n训练重点：${topic}\n考官风格：${form.examinerStyle}\n流程：${scene.steps.join('、')}。`,
+      target_jd: form.targetJd.trim(),
+      resume_id: form.resumeId,
+      version_id: form.versionId || undefined,
       difficulty: form.difficulty,
       total_questions: 5,
-      mode: 'hybrid',
+      mode: form.mode,
+      examiner_style: form.examinerStyle,
+      training_focus: `${form.direction}；${topic}；流程：${scene.steps.join('、')}`,
     })
     if (!interview) {
       message.error('考场创建失败，请稍后重试')
@@ -194,6 +309,10 @@ const createInterview = async () => {
     creating.value = false
   }
 }
+
+onMounted(() => {
+  void loadResumes()
+})
 </script>
 
 <style scoped>
@@ -214,8 +333,9 @@ h1{margin:0;font-family:"Songti SC","STSong",serif;font-size:clamp(38px,4.2vw,64
 .room-caption{position:absolute;left:38px;bottom:28px;padding:9px 12px;background:rgba(19,48,40,.9);color:#fff;font-size:12px}.live-dot{display:inline-block;width:7px;height:7px;margin-right:7px;border-radius:50%;background:#e46d43}
 .config-panel{padding:34px;display:flex;flex-direction:column}.config-heading{display:flex;justify-content:space-between;gap:20px;border-bottom:1px solid #d8ddd8;padding-bottom:22px}.config-heading p{margin:0 0 4px;color:#b45c36;font-size:12px;font-weight:700}.config-heading h2{margin:0;font-family:"Songti SC",serif;font-size:28px}.config-heading>span{color:#6d7c76;font-size:12px}
 .field-grid{display:grid;grid-template-columns:1fr 1fr;gap:18px 14px;margin-top:24px}.field-grid label,.topic-field{display:flex;flex-direction:column;gap:7px}.field-grid label>span,.topic-field>span{font-size:12px;color:#5c6e67}.field-grid :deep(.ant-select){width:100%}.topic-field{margin-top:18px}
+.source-grid{display:grid;grid-template-columns:1fr 1fr;gap:18px 14px;margin-top:24px}.source-grid label,.jd-field{display:flex;flex-direction:column;gap:7px}.source-grid label>span,.jd-field>span{font-size:12px;color:#5c6e67}.source-grid :deep(.ant-select){width:100%}.jd-field{margin-top:18px}.jd-field b{color:#b45c36;font-weight:600}
 .process-strip{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin:24px 0}.process-strip span{padding:12px 8px;border-top:1px solid #b9c4be;color:#52675f;font-size:11px}.process-strip b{display:block;margin-bottom:5px;color:#b45c36}
 .enter-button{margin-top:auto;display:inline-flex;align-items:center;justify-content:center;gap:8px;height:44px;padding:0 24px;border:1px solid transparent;border-radius:9999px;background:var(--primary);color:var(--primary-foreground);font-size:14px;font-weight:600;font-family:inherit;cursor:pointer;transition:background-color .15s ease,box-shadow .15s ease,transform .15s ease}.enter-button:hover{background:var(--brand-600);box-shadow:var(--shadow-md);transform:translateY(-1px)}.enter-button:disabled{opacity:.6;cursor:not-allowed;transform:none;box-shadow:none}
 @media(max-width:1300px){.scene-library{grid-template-columns:repeat(3,1fr)}.classroom-panel{grid-template-columns:minmax(0,1fr) 340px}.scenario-preview{min-height:500px}}
-@media(max-width:760px){.scene-page{padding:22px 14px 36px}.scene-library{grid-template-columns:1fr 1fr}.scene-card{min-height:132px;padding:14px}.scene-status{display:none}.classroom-panel{grid-template-columns:1fr}.scenario-preview{min-height:360px}.preview-copy{left:24px;right:24px;bottom:72px}.room-caption{left:24px}.config-panel{padding:24px}.field-grid{grid-template-columns:1fr}h1{font-size:36px}}
+@media(max-width:760px){.scene-page{padding:22px 14px 36px}.scene-library{grid-template-columns:1fr 1fr}.scene-card{min-height:132px;padding:14px}.scene-status{display:none}.classroom-panel{grid-template-columns:1fr}.scenario-preview{min-height:360px}.preview-copy{left:24px;right:24px;bottom:72px}.room-caption{left:24px}.config-panel{padding:24px}.field-grid,.source-grid{grid-template-columns:1fr}h1{font-size:36px}}
 </style>

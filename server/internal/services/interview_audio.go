@@ -16,6 +16,11 @@ import (
 // SendVoice 用户发送语音回答，先 Whisper 转写，再走文字逻辑
 // 返回 AI 下一题的消息（含 TTS audio_url）
 func (s *InterviewService) SendVoice(ctx context.Context, userID, interviewID uint, audio io.Reader, filename string, onDelta func(string)) (*models.InterviewMessage, error) {
+	return s.SendVoiceWithDuration(ctx, userID, interviewID, audio, filename, 0, onDelta)
+}
+
+// SendVoiceWithDuration is the no-preview voice answer path used by voice and hybrid rooms.
+func (s *InterviewService) SendVoiceWithDuration(ctx context.Context, userID, interviewID uint, audio io.Reader, filename string, durationSec int, onDelta func(string)) (*models.InterviewMessage, error) {
 	// 1. 保存音频文件到磁盘
 	_, absPath, err := utils.SaveFile(audio, s.storage.AudioDir, filename)
 	if err != nil {
@@ -34,7 +39,16 @@ func (s *InterviewService) SendVoice(ctx context.Context, userID, interviewID ui
 		return nil, err
 	}
 	if interview.Status != StatusOngoing {
+		if interview.Status == StatusPreparing {
+			return nil, ErrInterviewPreparing
+		}
 		return nil, ErrInterviewEnded
+	}
+	if strings.TrimSpace(interview.ResumeSnapshot) == "" {
+		return nil, ErrResumeRequired
+	}
+	if interview.Mode != ModeVoice && interview.Mode != ModeHybrid {
+		return nil, ErrModeNotAllowed
 	}
 
 	audioURL, err := storageURL(s.storage.BaseDir, absPath)
@@ -46,7 +60,9 @@ func (s *InterviewService) SendVoice(ctx context.Context, userID, interviewID ui
 		Role:        "user",
 		Content:     transcribed,
 		AudioURL:    audioURL,
+		InputMode:   ModeVoice,
 		QuestionNo:  interview.CurrentQuestionNo,
+		DurationSec: durationSec,
 	}
 	if err := s.db.Create(userMsg).Error; err != nil {
 		return nil, err

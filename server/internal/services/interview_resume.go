@@ -19,6 +19,9 @@ func (s *InterviewService) AttachResume(userID, interviewID uint, in *AttachResu
 	if interview.Status != StatusOngoing {
 		return nil, ErrInterviewEnded
 	}
+	if strings.TrimSpace(interview.ResumeSnapshot) != "" {
+		return nil, ErrResumeLocked
+	}
 
 	// 1. 校验简历归属
 	var resume models.Resume
@@ -47,8 +50,10 @@ func (s *InterviewService) AttachResume(userID, interviewID uint, in *AttachResu
 
 	// 4. 把简历快照写入面试
 	updates := map[string]interface{}{
-		"resume_snapshot": version.Content,
-		"resume_name":     resume.Name,
+		"resume_id":         resume.ID,
+		"resume_version_id": version.ID,
+		"resume_snapshot":   version.Content,
+		"resume_name":       resume.Name,
 	}
 	result := s.db.Model(&models.Interview{}).
 		Where("id = ? AND user_id = ? AND status = ?", interviewID, userID, StatusOngoing).
@@ -61,6 +66,8 @@ func (s *InterviewService) AttachResume(userID, interviewID uint, in *AttachResu
 	}
 	interview.ResumeSnapshot = version.Content
 	interview.ResumeName = resume.Name
+	interview.ResumeID = resume.ID
+	interview.ResumeVersionID = version.ID
 	return interview, nil
 }
 

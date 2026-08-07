@@ -48,6 +48,119 @@
   margin-bottom: 16px;
 }
 
+.voice-call-stage {
+  min-height: min(620px, calc(100dvh - 170px));
+  margin-bottom: 18px;
+  border: 1px solid #c6d0ca;
+  background:
+    linear-gradient(180deg, rgba(18, 49, 41, .08), rgba(18, 49, 41, .3)),
+    url('/scenes/interview-scenes-atlas.jpg') 33.333% 0 / 400% 300%;
+  color: #fff;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 22px;
+  position: relative;
+  overflow: hidden;
+}
+
+.voice-call-stage::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: rgba(8, 31, 25, .58);
+}
+
+.voice-call-stage > * {
+  position: relative;
+  z-index: 1;
+}
+
+.voice-call-header {
+  position: absolute;
+  top: 22px;
+  left: 24px;
+  right: 24px;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  font-size: 13px;
+}
+
+.voice-call-header small {
+  margin-left: auto;
+  color: #dbe7e0;
+}
+
+.voice-live-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #ff6b47;
+  box-shadow: 0 0 0 5px rgba(255, 107, 71, .2);
+}
+
+.voice-examiner-avatar {
+  width: 126px;
+  height: 126px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  border: 1px solid rgba(255, 255, 255, .55);
+  background: rgba(23, 62, 52, .88);
+  font-size: 34px;
+  font-weight: 700;
+  box-shadow: 0 0 0 14px rgba(255, 255, 255, .08);
+}
+
+.voice-examiner-avatar.speaking {
+  animation: voice-pulse 1.4s ease-in-out infinite;
+}
+
+.voice-question-caption {
+  max-width: 680px;
+  margin: 0;
+  padding: 0 24px;
+  text-align: center;
+  font-size: 17px;
+  line-height: 1.7;
+}
+
+.push-to-talk-button {
+  width: 176px;
+  min-height: 52px;
+  border: 1px solid rgba(255, 255, 255, .7);
+  border-radius: 999px;
+  background: #fff;
+  color: #173e34;
+  display: inline-flex;
+  justify-content: center;
+  align-items: center;
+  gap: 8px;
+  font: inherit;
+  cursor: pointer;
+}
+
+.push-to-talk-button.recording {
+  background: #c84e37;
+  color: #fff;
+  border-color: #c84e37;
+}
+
+.push-to-talk-button:disabled {
+  opacity: .65;
+  cursor: not-allowed;
+}
+
+.voice-call-hint {
+  color: #d8e4dd;
+}
+
+@keyframes voice-pulse {
+  50% { box-shadow: 0 0 0 24px rgba(255, 255, 255, .08); }
+}
+
 .classroom-stage {
   position: relative;
   min-height: 360px;

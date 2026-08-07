@@ -184,6 +184,7 @@ const modeStyle = (m: InterviewMode | string): { background: string; color: stri
 // 状态标签文字映射
 const statusLabel = (s: InterviewStatus | string): string => {
   const map: Record<string, string> = {
+    preparing: '准备中',
     ongoing: '进行中',
     completed: '已完成',
     cancelled: '已取消',

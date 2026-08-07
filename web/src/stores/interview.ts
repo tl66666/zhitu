@@ -7,6 +7,7 @@ import type {
   InterviewScore,
   CreateInterviewRequest,
   AttachResumeRequest,
+  InterviewMode,
 } from '@/types/models'
 import * as interviewApi from '@/api/interview'
 import { message } from 'ant-design-vue'
@@ -70,6 +71,47 @@ export const useInterviewStore = defineStore('interview', () => {
     }
   }
 
+  // 启动准备中的面试并接收基于简历/JD 的首题
+  const startInterview = async (id: number, onDelta?: (delta: string) => void) => {
+    sending.value = true
+    streamingText.value = ''
+    let started = false
+    try {
+      await interviewApi.startInterview(id, {
+        onDelta: (delta) => {
+          streamingText.value += delta
+          onDelta?.(delta)
+        },
+        onStarted: (data) => {
+          started = true
+          streamingText.value = ''
+          if (data.interview) currentInterview.value = data.interview
+          if (data.message) messages.value = [data.message]
+        },
+        onError: (errMsg) => message.error(errMsg || '面试准备失败'),
+      })
+      return started
+    } catch (error) {
+      console.error('启动面试失败:', error)
+      return false
+    } finally {
+      sending.value = false
+      streamingText.value = ''
+    }
+  }
+
+  const setMode = async (id: number, mode: InterviewMode) => {
+    try {
+      const response = await interviewApi.setInterviewMode(id, mode)
+      const updated = response.data.data
+      if (updated && currentInterview.value?.id === id) currentInterview.value = updated
+      return updated || null
+    } catch (error) {
+      console.error('切换面试模式失败:', error)
+      return null
+    }
+  }
+
   // 在面试中发送简历（绑定简历版本快照，AI 后续提问会结合简历内容）
   const attachResume = async (interviewId: number, data: AttachResumeRequest) => {
     try {
@@ -104,6 +146,7 @@ export const useInterviewStore = defineStore('interview', () => {
       role: 'user',
       content,
       audio_url: '',
+      input_mode: 'text',
       question_type: '',
       question_no: 0,
       duration_sec: 0,
@@ -155,6 +198,7 @@ export const useInterviewStore = defineStore('interview', () => {
   const sendVoice = async (
     id: number,
     audio: File,
+    durationSeconds = 0,
     onDelta?: (delta: string) => void,
     signal?: AbortSignal
   ) => {
@@ -168,6 +212,7 @@ export const useInterviewStore = defineStore('interview', () => {
       role: 'user',
       content: '（语音转写中...）',
       audio_url: '',
+      input_mode: 'voice',
       question_type: '',
       question_no: 0,
       duration_sec: 0,
@@ -179,6 +224,7 @@ export const useInterviewStore = defineStore('interview', () => {
       await interviewApi.sendVoice(
         id,
         audio,
+        durationSeconds,
         {
           onDelta: (delta) => {
             streamingText.value += delta
@@ -308,6 +354,8 @@ export const useInterviewStore = defineStore('interview', () => {
     fetchList,
     fetchOne,
     create,
+    startInterview,
+    setMode,
     attachResume,
     sendMessage,
     sendVoice,

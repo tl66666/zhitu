@@ -153,6 +153,12 @@ function dispatchEvent(event: SSEEvent, callbacks: SSECallbacks): void {
         version: event.version,
       })
       break
+    case 'started':
+      callbacks.onStarted?.({
+        message: event.message as never,
+        interview: event.interview,
+      })
+      break
     case 'interview_ended':
       callbacks.onInterviewEnded?.({
         message: event.message as never,

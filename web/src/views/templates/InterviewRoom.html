@@ -30,6 +30,18 @@
           </div>
         </div>
         <div class="header-right">
+          <a-radio-group
+            v-if="interviewStore.currentInterview && interviewStore.currentInterview.status !== 'completed'"
+            v-model:value="selectedMode"
+            size="small"
+            button-style="solid"
+            :disabled="interviewStore.sending || isRecording || recordingFinalizing || isPreparing"
+            @change="handleModeChange"
+          >
+            <a-radio-button value="text">文字</a-radio-button>
+            <a-radio-button value="voice">语音</a-radio-button>
+            <a-radio-button value="hybrid">混合</a-radio-button>
+          </a-radio-group>
           <a-button
             v-if="interviewStore.currentInterview?.status === 'ongoing'"
             danger
@@ -40,7 +52,7 @@
         </div>
       </div>
 
-      <section v-if="isTeachingScene" class="classroom-stage">
+      <section v-if="isTeachingScene && !isVoiceMode" class="classroom-stage">
         <div class="stage-meta">
           <span>模拟教室</span>
           <strong>{{ currentTeachingPhase }}</strong>
@@ -67,10 +79,33 @@
         </div>
       </section>
 
+      <section v-if="isVoiceMode" class="voice-call-stage">
+        <div class="voice-call-header">
+          <span class="voice-live-dot"></span>
+          <span>AI 面试官语音通话</span>
+          <small>{{ voiceStatusText }}</small>
+        </div>
+        <div class="voice-examiner-avatar" :class="{ speaking: playingMessageId !== null }">AI</div>
+        <p class="voice-question-caption">{{ latestQuestion }}</p>
+        <button
+          class="push-to-talk-button"
+          :class="{ recording: isRecording }"
+          :disabled="interviewStore.sending || voicePreparing || recordingFinalizing || !isOngoing"
+          @click="toggleVoiceRecording"
+        >
+          <AudioOutlined />
+          <span v-if="voicePreparing">正在连接麦克风</span>
+          <span v-else-if="recordingFinalizing">正在处理回答</span>
+          <span v-else-if="isRecording">松开结束 {{ recordingTimeLabel }}</span>
+          <span v-else>按住说话</span>
+        </button>
+        <small class="voice-call-hint">回答会在录音结束后自动发送，无需确认或转文字</small>
+      </section>
+
       <!-- 主体：左消息流 + 右信息/复盘 -->
       <a-row :gutter="16" class="room-body">
         <!-- 左侧消息流 -->
-        <a-col :span="16">
+        <a-col v-if="!isVoiceMode" :span="16">
           <a-card class="chat-card" :bordered="false" :body-style="{ padding: '0' }">
             <template #title>
               <span><MessageOutlined /> 面试对话</span>
@@ -105,18 +140,6 @@
                     <span v-if="msg.duration_sec > 0" class="msg-duration">
                       · {{ msg.duration_sec }}s
                     </span>
-                    <!-- TTS 播放按钮：仅 assistant 消息 + mode 为 voice/hybrid -->
-                    <a-button
-                      v-if="canPlayTts && msg.role === 'assistant'"
-                      type="link"
-                      size="small"
-                      :loading="ttsLoadingId === msg.id"
-                      :disabled="ttsLoadingId !== null && ttsLoadingId !== msg.id"
-                      @click="handlePlayTts(msg)"
-                    >
-                      <SoundOutlined />
-                      {{ playingMessageId === msg.id ? '停止' : '播放' }}
-                    </a-button>
                   </div>
                   <div class="msg-bubble" v-html="renderMessageContent(msg.content)"></div>
                   <div class="msg-time">{{ formatTime(msg.created_at) }}</div>
@@ -144,54 +167,13 @@
             <!-- 输入区 -->
             <div class="chat-input-area" v-if="isOngoing">
               <a-textarea
+                v-if="showTextInput"
                 v-model:value="inputText"
                 :rows="3"
-                :placeholder="audioDraft ? '录音已作为音频文件加入，可转成文字后编辑' : '输入你的回答...'"
-                :disabled="interviewStore.sending || isRecording || voicePreparing || recordingFinalizing || !!audioDraft"
+                placeholder="输入你的回答..."
+                :disabled="interviewStore.sending || isRecording || voicePreparing || recordingFinalizing"
                 @keydown.enter.exact="handleAnswerKeydown"
               />
-              <div v-if="audioDraft" class="audio-draft-card">
-                <div class="audio-draft-main">
-                  <div class="audio-file-icon"><AudioOutlined /></div>
-                  <div class="audio-file-info">
-                    <strong>{{ audioDraft.file.name }}</strong>
-                    <span>
-                      WAV · {{ formatDuration(audioDraft.durationSeconds) }}
-                      · {{ formatFileSize(audioDraft.file.size) }}
-                    </span>
-                  </div>
-                  <audio :src="audioDraft.objectUrl" controls preload="metadata"></audio>
-                </div>
-                <div class="audio-draft-actions">
-                  <a-button
-                    type="link"
-                    size="small"
-                    :loading="transcribingDraft"
-                    :disabled="interviewStore.sending"
-                    @click="handleTranscribeDraft"
-                  >
-                    转化为文本
-                  </a-button>
-                  <a-button
-                    type="link"
-                    size="small"
-                    :disabled="transcribingDraft || interviewStore.sending"
-                    @click="rerecordVoice"
-                  >
-                    重新录制
-                  </a-button>
-                  <a-button
-                    type="text"
-                    danger
-                    size="small"
-                    :disabled="transcribingDraft || interviewStore.sending"
-                    @click="clearAudioDraft"
-                  >
-                    删除
-                  </a-button>
-                  <small>可先转成文字并编辑，也可直接点击发送，由后台转写后继续分析。</small>
-                </div>
-              </div>
               <div class="input-toolbar">
                 <div class="toolbar-left">
                   <!-- 麦克风录音（mode 为 voice/hybrid 时可用） -->
@@ -199,33 +181,27 @@
                     v-if="canSendVoice"
                     :danger="isRecording"
                     :loading="voicePreparing || recordingFinalizing"
-                    :disabled="interviewStore.sending || voicePreparing || recordingFinalizing || !!audioDraft"
+                    :disabled="interviewStore.sending || voicePreparing || recordingFinalizing"
                     :class="{ 'recording-button': isRecording }"
                     @click="toggleVoiceRecording"
                   >
                     <AudioOutlined />
                     <span v-if="voicePreparing">正在获取麦克风</span>
-                    <span v-else-if="recordingFinalizing">正在生成录音</span>
+                    <span v-else-if="recordingFinalizing">正在处理回答</span>
                     <span v-else-if="isRecording">结束录音 {{ recordingTimeLabel }}</span>
                     <span v-else>语音回答</span>
                   </a-button>
-                  <!-- 发送简历：把简历绑定到本次面试，AI 后续提问会结合简历内容 -->
-                  <a-button
-                    :type="resumeAttached ? 'default' : 'dashed'"
-                    :disabled="interviewStore.sending || isRecording || voicePreparing || recordingFinalizing || !isOngoing"
-                    @click="openResumeModal"
-                  >
-                    <FileTextOutlined />
-                    <span v-if="resumeAttached">简历已发送</span>
-                    <span v-else>发送简历</span>
+                  <a-button v-if="isHybridMode" type="text" @click="hybridTextInput = !hybridTextInput">
+                    {{ hybridTextInput ? '切换语音输入' : '切换键盘输入' }}
                   </a-button>
-                  <span class="input-hint">Enter 发送 · Shift+Enter 换行</span>
+                  <span v-if="showTextInput" class="input-hint">Enter 发送 · Shift+Enter 换行</span>
                 </div>
                 <div class="toolbar-right">
                   <a-button
                     type="primary"
                     :loading="interviewStore.sending"
-                    :disabled="(!inputText.trim() && !audioDraft) || isRecording || voicePreparing || recordingFinalizing || transcribingDraft"
+                    v-if="showTextInput"
+                    :disabled="!inputText.trim() || isRecording || voicePreparing || recordingFinalizing"
                     @click="handleSendAnswer"
                   >
                     <SendOutlined /> 发送
@@ -244,7 +220,7 @@
         </a-col>
 
         <!-- 右侧信息/复盘 -->
-        <a-col :span="8">
+        <a-col :span="isVoiceMode ? 24 : 8">
           <a-card class="side-card" :bordered="false">
             <a-tabs v-model:activeKey="sideTab">
               <!-- 面试信息 -->
@@ -292,17 +268,17 @@
                   </div>
 
                   <div class="resume-block-info">
-                    <div class="block-title">已发送简历</div>
+                    <div class="block-title">本次面试简历</div>
                     <a-alert
-                      v-if="resumeAttached"
+                      v-if="interviewStore.currentInterview.resume_snapshot"
                       type="success"
                       show-icon
                       :message="`简历：${interviewStore.currentInterview.resume_name || '未命名简历'}`"
-                      description="已绑定至本次面试。"
+                      description="已固化为本次面试快照。"
                     />
                     <a-empty
                       v-else
-                      description="尚未发送简历，可在输入区点击「发送简历」绑定"
+                      description="尚未绑定简历"
                       :image="simpleImage"
                     />
                   </div>
@@ -459,75 +435,4 @@
       preload="none"
     ></audio>
 
-    <!-- 发送简历弹窗：选择简历 + 版本 -->
-    <a-modal
-      v-model:open="resumeModalVisible"
-      title="发送简历给 AI 面试官"
-      ok-text="发送简历"
-      cancel-text="取消"
-      :ok-button-props="{ loading: attaching, disabled: !selectedResumeId }"
-      :cancel-button-props="{ disabled: attaching }"
-      :mask-closable="false"
-      width="520px"
-      @ok="confirmAttachResume"
-    >
-      <a-spin :spinning="loadingResumes" tip="加载简历列表...">
-        <a-empty
-          v-if="!loadingResumes && resumeList.length === 0"
-          description="还没有简历，请先到「简历实验室」创建简历"
-        >
-          <a-button type="primary" @click="goToResumeLab">前往简历实验室</a-button>
-        </a-empty>
-        <div v-else class="resume-modal-body">
-          <p class="modal-tip">
-            选择一份简历绑定到本次面试。
-          </p>
-          <a-form layout="vertical">
-            <a-form-item label="选择简历">
-              <a-select
-                v-model:value="selectedResumeId"
-                placeholder="请选择简历"
-                :disabled="attaching"
-                @change="onResumeChange"
-              >
-                <a-select-option
-                  v-for="r in resumeList"
-                  :key="r.id"
-                  :value="r.id"
-                >
-                  {{ r.name }}
-                  <span class="resume-meta">
-                    （{{ r.target_position || '未指定岗位' }}）
-                  </span>
-                </a-select-option>
-              </a-select>
-            </a-form-item>
-            <a-form-item label="选择版本">
-              <a-select
-                v-model:value="selectedVersionId"
-                placeholder="默认使用当前版本"
-                :disabled="attaching || !selectedResumeId || loadingVersions"
-                :loading="loadingVersions"
-              >
-                <a-select-option :value="0">当前版本</a-select-option>
-                <a-select-option
-                  v-for="v in versionList"
-                  :key="v.id"
-                  :value="v.id"
-                >
-                  {{ v.version_label }}
-                  <span class="resume-meta">· {{ formatVersionTime(v.created_at) }}</span>
-                </a-select-option>
-              </a-select>
-            </a-form-item>
-          </a-form>
-          <a-alert
-            v-if="resumeAttached"
-            type="info"
-            show-icon
-            message="本次面试已绑定过简历，再次发送将覆盖之前绑定的简历。"
-          />
-        </div>
-      </a-spin>
-    </a-modal>
   </div>

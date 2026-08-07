@@ -24,8 +24,19 @@ func TestCreateSupportsAllSceneHallScenesWithoutLLM(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open test database: %v", err)
 	}
-	if err := db.AutoMigrate(&models.Interview{}, &models.InterviewMessage{}); err != nil {
+	if err := db.AutoMigrate(&models.Interview{}, &models.InterviewMessage{}, &models.Resume{}, &models.ResumeVersion{}); err != nil {
 		t.Fatalf("migrate test database: %v", err)
+	}
+	resume := models.Resume{UserID: 1, Name: "测试简历", TargetPosition: "后端工程师"}
+	if err := db.Create(&resume).Error; err != nil {
+		t.Fatalf("create resume: %v", err)
+	}
+	version := models.ResumeVersion{ResumeID: resume.ID, VersionLabel: "v1.0", Content: `{"personal":{"name":"候选人"},"project":[{"name":"支付平台"}]}`}
+	if err := db.Create(&version).Error; err != nil {
+		t.Fatalf("create resume version: %v", err)
+	}
+	if err := db.Model(&resume).Update("current_version_id", version.ID).Error; err != nil {
+		t.Fatalf("set current version: %v", err)
 	}
 
 	service := NewInterviewService(db, nil, nil, nil)
@@ -49,24 +60,98 @@ func TestCreateSupportsAllSceneHallScenesWithoutLLM(t *testing.T) {
 			interview, err := service.Create(context.Background(), 1, &CreateInterviewInput{
 				Scene:          scene,
 				TargetPosition: "测试岗位",
+				TargetJD:       "负责支付系统开发，要求熟悉 Go 和分布式系统。",
+				ResumeID:       resume.ID,
 				TotalQuestions: 5,
 				Mode:           ModeHybrid,
 			})
 			if err != nil {
 				t.Fatalf("create scene %q: %v", scene, err)
 			}
-			if interview.CurrentQuestionNo != 1 {
-				t.Fatalf("current question = %d, want 1", interview.CurrentQuestionNo)
+			if interview.Status != StatusPreparing {
+				t.Fatalf("status = %q, want %q", interview.Status, StatusPreparing)
 			}
-
-			var firstQuestion models.InterviewMessage
-			if err := db.Where("interview_id = ? AND question_no = 1", interview.ID).First(&firstQuestion).Error; err != nil {
-				t.Fatalf("load first question: %v", err)
+			if interview.CurrentQuestionNo != 0 {
+				t.Fatalf("current question = %d, want 0", interview.CurrentQuestionNo)
 			}
-			if firstQuestion.Content == "" {
-				t.Fatal("first question is empty")
+			var count int64
+			if err := db.Model(&models.InterviewMessage{}).Where("interview_id = ?", interview.ID).Count(&count).Error; err != nil {
+				t.Fatalf("count messages: %v", err)
+			}
+			if count != 0 {
+				t.Fatalf("message count = %d, want 0 before start", count)
 			}
 		})
+	}
+}
+
+func TestStartGeneratesResumeAndJDGroundedFirstQuestion(t *testing.T) {
+	requests := make(chan map[string]interface{}, 1)
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var payload map[string]interface{}
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		requests <- payload
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"role":"assistant","content":"请结合支付平台项目说明你如何处理分布式一致性？"}}]}`))
+	}))
+	defer upstream.Close()
+
+	db, err := gorm.Open(sqlite.Open("file:start_grounded_test?mode=memory&cache=shared"), &gorm.Config{
+		DisableForeignKeyConstraintWhenMigrating: true,
+	})
+	if err != nil {
+		t.Fatalf("open test database: %v", err)
+	}
+	if err := db.AutoMigrate(&models.Interview{}, &models.InterviewMessage{}, &models.Resume{}, &models.ResumeVersion{}); err != nil {
+		t.Fatalf("migrate test database: %v", err)
+	}
+	resume := models.Resume{UserID: 1, Name: "后端简历"}
+	if err := db.Create(&resume).Error; err != nil {
+		t.Fatalf("create resume: %v", err)
+	}
+	content := `{"personal":{"name":"候选人"},"project":[{"name":"支付平台","role":"负责人","description":"负责订单一致性和高并发架构"}]}`
+	version := models.ResumeVersion{ResumeID: resume.ID, VersionLabel: "v1.0", Content: content}
+	if err := db.Create(&version).Error; err != nil {
+		t.Fatalf("create resume version: %v", err)
+	}
+	if err := db.Model(&resume).Update("current_version_id", version.ID).Error; err != nil {
+		t.Fatalf("set current version: %v", err)
+	}
+
+	service := NewInterviewService(db, NewLLMService(&config.LLMConfig{
+		Provider: "mimo", BaseURL: upstream.URL, APIKey: "test-key", ChatModel: "test-chat",
+	}), nil, nil)
+	interview, err := service.Create(context.Background(), 1, &CreateInterviewInput{
+		Scene: "tech", TargetPosition: "后端工程师", TargetJD: "负责支付系统开发，要求熟悉 Go 和分布式系统。", ResumeID: resume.ID,
+		TotalQuestions: 5, Mode: ModeVoice,
+	})
+	if err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+	started, first, err := service.Start(context.Background(), 1, interview.ID, nil)
+	if err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+	if started.Status != StatusOngoing || started.CurrentQuestionNo != 1 {
+		t.Fatalf("started interview = status %q, question %d", started.Status, started.CurrentQuestionNo)
+	}
+	if first == nil || first.Content == "" {
+		t.Fatal("Start() returned an empty first question")
+	}
+
+	payload := <-requests
+	rawMessages, ok := payload["messages"].([]interface{})
+	if !ok || len(rawMessages) == 0 {
+		t.Fatalf("messages = %#v", payload["messages"])
+	}
+	system := rawMessages[0].(map[string]interface{})["content"].(string)
+	for _, expected := range []string{"负责支付系统开发", "支付平台", "订单一致性"} {
+		if !strings.Contains(system, expected) {
+			t.Fatalf("system prompt missing %q:\n%s", expected, system)
+		}
 	}
 }
 

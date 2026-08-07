@@ -32,10 +32,80 @@ func (h *InterviewHandler) Create(c *gin.Context) {
 	}
 	interview, err := h.svc.Create(c.Request.Context(), userID, &in)
 	if err != nil {
+		switch err {
+		case services.ErrResumeRequired, services.ErrResumeNotFound, services.ErrVersionNotFound, services.ErrInvalidMode, services.ErrTargetJDRequired:
+			utils.BadRequest(c, err.Error())
+			return
+		}
 		utils.InternalError(c, err.Error())
 		return
 	}
 	utils.OKWithMsg(c, "interview created", interview)
+}
+
+// Start POST /api/v1/interviews/:id/start 生成基于简历和 JD 的首题（SSE）
+func (h *InterviewHandler) Start(c *gin.Context) {
+	userID := c.GetUint(middleware.ContextUserID)
+	id, _ := strconv.ParseUint(c.Param("id"), 10, 64)
+	h.setSSEHeaders(c)
+	flusher, ok := c.Writer.(interface{ Flush() })
+	if !ok {
+		utils.InternalError(c, "streaming not supported")
+		return
+	}
+	interview, first, err := h.svc.Start(c.Request.Context(), userID, uint(id), func(delta string) {
+		data, _ := json.Marshal(map[string]string{"type": "delta", "content": delta})
+		fmt.Fprintf(c.Writer, "data: %s\n\n", data)
+		flusher.Flush()
+	})
+	if err != nil {
+		errData, _ := json.Marshal(map[string]string{"type": "error", "message": err.Error()})
+		fmt.Fprintf(c.Writer, "data: %s\n\n", errData)
+		flusher.Flush()
+		return
+	}
+	startedData, _ := json.Marshal(map[string]interface{}{
+		"type":      "started",
+		"message":   first,
+		"interview": interview,
+	})
+	fmt.Fprintf(c.Writer, "data: %s\n\n", startedData)
+	flusher.Flush()
+}
+
+// SetMode PATCH /api/v1/interviews/:id/mode 切换进行中的交互模式
+func (h *InterviewHandler) SetMode(c *gin.Context) {
+	userID := c.GetUint(middleware.ContextUserID)
+	id, _ := strconv.ParseUint(c.Param("id"), 10, 64)
+	var req struct {
+		Mode string `json:"mode" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		utils.BadRequest(c, err.Error())
+		return
+	}
+	interview, err := h.svc.SetMode(userID, uint(id), req.Mode)
+	if err != nil {
+		switch err {
+		case services.ErrInterviewNotFound:
+			utils.NotFound(c, err.Error())
+		case services.ErrInvalidMode:
+			utils.BadRequest(c, err.Error())
+		case services.ErrInterviewEnded:
+			utils.Conflict(c, err.Error())
+		default:
+			utils.InternalError(c, err.Error())
+		}
+		return
+	}
+	utils.OK(c, interview)
+}
+
+func (h *InterviewHandler) setSSEHeaders(c *gin.Context) {
+	c.Header("Content-Type", "text/event-stream")
+	c.Header("Cache-Control", "no-cache")
+	c.Header("Connection", "keep-alive")
+	c.Header("X-Accel-Buffering", "no")
 }
 
 // List GET /api/v1/interviews
@@ -99,6 +169,8 @@ func (h *InterviewHandler) AttachResume(c *gin.Context) {
 			utils.NotFound(c, "resume version not found")
 		case services.ErrInterviewEnded:
 			utils.BadRequest(c, "interview already ended, cannot attach resume")
+		case services.ErrResumeLocked:
+			utils.Conflict(c, "resume is locked for this interview")
 		default:
 			utils.InternalError(c, err.Error())
 		}
@@ -121,10 +193,7 @@ func (h *InterviewHandler) SendMessage(c *gin.Context) {
 	}
 
 	// SSE 头
-	c.Header("Content-Type", "text/event-stream")
-	c.Header("Cache-Control", "no-cache")
-	c.Header("Connection", "keep-alive")
-	c.Header("X-Accel-Buffering", "no")
+	h.setSSEHeaders(c)
 
 	flusher, ok := c.Writer.(interface{ Flush() })
 	if !ok {
@@ -139,6 +208,12 @@ func (h *InterviewHandler) SendMessage(c *gin.Context) {
 		flusher.Flush()
 	})
 	if err != nil {
+		if err == services.ErrInterviewPreparing || err == services.ErrResumeRequired || err == services.ErrModeNotAllowed {
+			errData, _ := json.Marshal(map[string]string{"type": "error", "message": err.Error()})
+			fmt.Fprintf(c.Writer, "data: %s\n\n", errData)
+			flusher.Flush()
+			return
+		}
 		errData, _ := json.Marshal(map[string]string{"type": "error", "message": err.Error()})
 		fmt.Fprintf(c.Writer, "data: %s\n\n", errData)
 		flusher.Flush()
@@ -188,10 +263,7 @@ func (h *InterviewHandler) SendVoice(c *gin.Context) {
 	}
 
 	// SSE 头（语音模式也用 SSE 推送 AI 回复）
-	c.Header("Content-Type", "text/event-stream")
-	c.Header("Cache-Control", "no-cache")
-	c.Header("Connection", "keep-alive")
-	c.Header("X-Accel-Buffering", "no")
+	h.setSSEHeaders(c)
 
 	flusher, ok := c.Writer.(interface{ Flush() })
 	if !ok {
@@ -204,7 +276,8 @@ func (h *InterviewHandler) SendVoice(c *gin.Context) {
 	fmt.Fprintf(c.Writer, "data: %s\n\n", transcribeData)
 	flusher.Flush()
 
-	aiMsg, err := h.svc.SendVoice(c.Request.Context(), userID, uint(interviewID), file, header.Filename, func(delta string) {
+	durationSec, _ := strconv.Atoi(c.PostForm("duration_sec"))
+	aiMsg, err := h.svc.SendVoiceWithDuration(c.Request.Context(), userID, uint(interviewID), file, header.Filename, durationSec, func(delta string) {
 		data, _ := json.Marshal(map[string]string{"type": "delta", "content": delta})
 		fmt.Fprintf(c.Writer, "data: %s\n\n", data)
 		flusher.Flush()
@@ -216,15 +289,17 @@ func (h *InterviewHandler) SendVoice(c *gin.Context) {
 		return
 	}
 
+	interview, _ := h.svc.Get(userID, uint(interviewID))
 	if aiMsg != nil {
 		doneData, _ := json.Marshal(map[string]interface{}{
-			"type":    "done",
-			"message": aiMsg,
+			"type":      "done",
+			"message":   aiMsg,
+			"interview": interview,
 		})
 		fmt.Fprintf(c.Writer, "data: %s\n\n", doneData)
 	} else {
 		// 面试已结束
-		doneData, _ := json.Marshal(map[string]string{"type": "interview_ended"})
+		doneData, _ := json.Marshal(map[string]interface{}{"type": "interview_ended", "interview": interview})
 		fmt.Fprintf(c.Writer, "data: %s\n\n", doneData)
 	}
 	flusher.Flush()

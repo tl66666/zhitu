@@ -10,12 +10,16 @@ type Interview struct {
 	TargetCompany     string     `gorm:"size:100" json:"target_company"`
 	TargetPosition    string     `gorm:"size:100" json:"target_position"`
 	TargetJD          string     `gorm:"type:text" json:"target_jd"`
-	ResumeSnapshot    string     `gorm:"type:text" json:"resume_snapshot"`      // 用户在面试中发送的简历快照（版本内容 JSON）
-	ResumeName        string     `gorm:"size:100" json:"resume_name"`           // 简历名称（用于前端展示）
+	ResumeID          uint       `gorm:"index;default:0" json:"resume_id"`
+	ResumeVersionID   uint       `gorm:"index;default:0" json:"resume_version_id"`
+	ResumeSnapshot    string     `gorm:"type:text" json:"resume_snapshot"` // 面试开始前固化的简历快照（版本内容 JSON）
+	ResumeName        string     `gorm:"size:100" json:"resume_name"`      // 简历名称（用于前端展示）
+	ExaminerStyle     string     `gorm:"size:30" json:"examiner_style"`
+	TrainingFocus     string     `gorm:"size:500" json:"training_focus"`
 	Difficulty        string     `gorm:"size:20;default:mid" json:"difficulty"` // junior/mid/senior/mixed
 	TotalQuestions    int        `gorm:"default:8" json:"total_questions"`
-	Mode              string     `gorm:"size:20;default:text" json:"mode"`      // text/voice/hybrid
-	Status            string     `gorm:"size:20;default:ongoing" json:"status"` // ongoing/completed/cancelled
+	Mode              string     `gorm:"size:20;default:hybrid" json:"mode"`      // text/voice/hybrid
+	Status            string     `gorm:"size:20;default:preparing" json:"status"` // preparing/ongoing/completed/cancelled
 	CurrentQuestionNo int        `gorm:"default:0" json:"current_question_no"`
 	StartedAt         *time.Time `json:"started_at,omitempty"`
 	EndedAt           *time.Time `json:"ended_at,omitempty"`
@@ -32,6 +36,7 @@ type InterviewMessage struct {
 	Role         string    `gorm:"size:10;not null" json:"role"` // assistant / user
 	Content      string    `gorm:"type:text" json:"content"`
 	AudioURL     string    `gorm:"size:500" json:"audio_url"`    // user=录音，assistant=TTS
+	InputMode    string    `gorm:"size:20" json:"input_mode"`    // text/voice（用户回答实际使用的通道）
 	QuestionType string    `gorm:"size:20" json:"question_type"` // project/algorithm/system_design/behavior/open/followup
 	QuestionNo   int       `gorm:"default:0" json:"question_no"`
 	DurationSec  int       `json:"duration_sec"`

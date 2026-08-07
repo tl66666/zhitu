@@ -310,6 +310,7 @@ export type InterviewMode = 'text' | 'voice' | 'hybrid'
 
 // 面试状态
 export type InterviewStatus = 'ongoing' | 'completed' | 'cancelled'
+  | 'preparing'
 
 // 面试难度
 export type InterviewDifficulty = 'junior' | 'mid' | 'senior' | 'mixed'
@@ -325,8 +326,12 @@ export interface Interview {
   target_company: string
   target_position: string
   target_jd: string
+  resume_id: number
+  resume_version_id: number
   resume_snapshot: string
   resume_name: string
+  examiner_style: string
+  training_focus: string
   difficulty: InterviewDifficulty | string
   total_questions: number
   mode: InterviewMode
@@ -343,10 +348,14 @@ export interface CreateInterviewRequest {
   scene: InterviewScene
   target_company?: string
   target_position: string
-  target_jd?: string
+  target_jd: string
+  resume_id: number
+  version_id?: number
   difficulty?: InterviewDifficulty
   total_questions?: number
   mode?: InterviewMode
+  examiner_style?: string
+  training_focus?: string
 }
 
 // 面试发送简历请求
@@ -362,6 +371,7 @@ export interface InterviewMessage {
   role: MessageRole
   content: string
   audio_url: string
+  input_mode: InterviewMode | string
   question_type: string
   question_no: number
   duration_sec: number
@@ -423,6 +433,7 @@ export type SSEEventType =
   | 'delta'
   | 'status'
   | 'done'
+  | 'started'
   | 'interview_ended'
   | 'error'
 
@@ -440,6 +451,7 @@ export interface SSECallbacks {
   onDelta?: (delta: string) => void
   onStatus?: (message: string) => void
   onDone?: (data: { message?: InterviewMessage; version?: ResumeVersion }) => void
+  onStarted?: (data: { message?: InterviewMessage; interview?: Interview }) => void
   onInterviewEnded?: (data: {
     message?: InterviewMessage
     interview?: Interview

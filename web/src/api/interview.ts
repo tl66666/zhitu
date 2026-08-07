@@ -1,4 +1,4 @@
-import { get, post } from '@/utils/request'
+import { get, post, patch } from '@/utils/request'
 import { streamSSE, streamSSEWithForm } from '@/utils/sse'
 import type {
   ApiResponse,
@@ -30,6 +30,23 @@ export const createInterview = (data: CreateInterviewRequest) => {
   return post<ApiResponse<Interview>>('/api/v1/interviews', data)
 }
 
+// 启动准备中的面试，首题会结合已绑定简历和 JD 通过 SSE 生成
+export const startInterview = (
+  interviewId: number,
+  callbacks: SSECallbacks,
+  signal?: AbortSignal
+) => {
+  return streamSSE(`/api/v1/interviews/${interviewId}/start`, callbacks, { signal })
+}
+
+// 面试中切换交互模式
+export const setInterviewMode = (interviewId: number, mode: string) => {
+  return patch<ApiResponse<Interview>>(
+    `/api/v1/interviews/${interviewId}/mode`,
+    { mode }
+  )
+}
+
 // 在面试中发送简历（把指定简历版本的快照绑定到面试会话）
 export const attachResume = (interviewId: number, data: AttachResumeRequest) => {
   return post<ApiResponse<Interview>>(
@@ -56,11 +73,13 @@ export const sendMessage = (
 export const sendVoice = (
   interviewId: number,
   audio: File,
+  durationSeconds: number,
   callbacks: SSECallbacks,
   signal?: AbortSignal
 ) => {
   const formData = new FormData()
   formData.append('audio', audio)
+  formData.append('duration_sec', String(Math.max(0, Math.round(durationSeconds))))
   return streamSSEWithForm(
     `/api/v1/interviews/${interviewId}/voice`,
     formData,
