@@ -97,6 +97,11 @@ const routes: RouteRecordRaw[] = [
         component: () => import('@/views/ResumeEditor.vue'),
         props: true,
       },
+      {
+        path: 'copilot',
+        name: 'Copilot',
+        component: () => import('@/views/Copilot.vue'),
+      },
       // 面试列表
       {
         path: 'interviews',

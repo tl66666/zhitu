@@ -644,6 +644,92 @@ POST /api/v1/resumes/:id/sync-profile
 
 ---
 
+### 4.5 求职 Copilot
+
+Copilot 是浏览器侧保留会话、服务端按任务读取简历上下文的轻量 Agent 工作流。服务端不落库聊天记录；浏览器用 Cookie 保存当前会话 ID，用 IndexedDB 保存消息（不支持 IndexedDB 时降级到 `localStorage`）。每次请求都会重新校验简历和版本归属。
+
+支持四种任务：
+
+| task | 用途 | 是否需要 JD |
+|------|------|------------|
+| `jd_match` | 简历-JD 匹配分数、优势、缺失能力和修改建议 | 是 |
+| `project_optimize` | 选中一个项目，按 STAR 和实习校招场景多轮优化 | 否 |
+| `interview_predict` | 预测岗位高频问题和简历追问风险 | 是 |
+| `career_chat` | 结合简历上下文的求职自由问答 | 否 |
+
+#### 对话
+
+```
+POST /api/v1/copilot/chat
+```
+
+**请求体**
+
+```json
+{
+  "task": "jd_match",
+  "resume_id": 12,                  // 已保存简历 ID；没有时传 0
+  "version_id": 34,                 // 可选，缺省读取当前版本
+  "jd": "岗位描述全文",              // jd_match/interview_predict 必填
+  "project_index": 0,               // project_optimize 必填，从 0 开始
+  "draft_content": "{...}",         // 可选，编辑器未保存内容或粘贴的简历
+  "messages": [
+    {"role": "user", "content": "先分析匹配度"},
+    {"role": "assistant", "content": "..."}
+  ]
+}
+```
+
+当 `resume_id=0` 时，必须提供 `draft_content`。它可以是现有简历 JSON，也可以是纯文本；纯文本会作为临时简历上下文使用，不会创建简历记录。
+
+**响应**为 SSE。先返回 `status`，完成时返回：
+
+```json
+{
+  "type": "done",
+  "message": {"role": "assistant", "content": "匹配度为 78 分……"},
+  "result": {
+    "task": "jd_match",
+    "reply": "匹配度为 78 分……",
+    "context": {"resume_id": 12, "version_id": 34, "using_draft": false},
+    "match": {
+      "match_score": 78,
+      "strengths": ["有 Go 服务开发项目"],
+      "missing_capabilities": ["缺少可验证的性能指标"],
+      "requirement_map": [],
+      "recommendations": ["补充个人负责范围和结果"]
+    },
+    "proposals": []
+  }
+}
+```
+
+`project_optimize` 会额外返回 `proposals`。提案只包含候选文案，不会自动修改简历；用户确认后调用应用接口。
+
+#### 应用项目优化提案
+
+```
+POST /api/v1/copilot/apply
+```
+
+**请求体**
+
+```json
+{
+  "resume_id": 12,
+  "base_version_id": 34,
+  "content": "{...}",
+  "project_index": 0,
+  "replacement_description": "使用 Go 重构支付接口，降低延迟",
+  "replacement_tech_stack": ["Go", "MySQL"],
+  "change_note": "Copilot 项目优化"
+}
+```
+
+服务端会再次确认 `base_version_id` 仍为简历当前版本，只允许修改指定项目索引，并通过现有 `ResumeService.CreateVersion` 生成新版本。若期间简历已变化，返回 `409`，需要刷新上下文后重新生成提案。
+
+---
+
 ## 5. 模拟面试模块 /api/v1/interviews
 
 所有接口需登录。支持文字/语音/混合模式，AI 自动发问，结束后生成复盘报告。

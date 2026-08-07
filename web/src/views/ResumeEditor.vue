@@ -227,47 +227,26 @@ const runJdMatch = async () => {
     message.warning('请先粘贴 JD 内容')
     return
   }
-  jdLoading.value = true
-  await new Promise((r) => setTimeout(r, 900))
-  // 提取 JD 中的关键词
-  const jdText = targetJd.value.toLowerCase()
-  const jdKeywords = techKeywords.filter((k) => jdText.includes(k.toLowerCase()))
-  // 简历全文
-  const resumeText = (
-    resumeContent.personal.name + ' ' +
-    resumeContent.intention.position + ' ' +
-    resumeContent.skills.map((s) => s.name).join(' ') + ' ' +
-    [...resumeContent.work, ...resumeContent.project].map((i) => i.description).join(' ')
-  ).toLowerCase()
-  const matched = jdKeywords.filter((k) => resumeText.includes(k.toLowerCase()))
-  const missing = jdKeywords.filter((k) => !resumeText.includes(k.toLowerCase()))
+  openCopilot('jd_match')
+}
 
-  const matchRate = jdKeywords.length
-    ? Math.round((matched.length / jdKeywords.length) * 100)
-    : 50
-
-  const suggest: { title: string; detail: string }[] = []
-  if (missing.length > 0) {
-    suggest.push({
-      title: '补充技术关键词',
-      detail: `简历中未提及：${missing.slice(0, 5).join('、')}。如有相关经验，建议在技能或项目描述中体现。`,
-    })
+const openCopilot = (task: 'jd_match' | 'project_optimize' | 'interview_predict' | 'career_chat', projectIndex?: number, question?: string) => {
+  if (!demoMode.value && resumeId.value) {
+    localStorage.setItem('zhitu-copilot-draft', JSON.stringify({
+      resume_id: resumeId.value,
+      content: JSON.stringify(resumeContent),
+    }))
   }
-  if (matched.length > 0) {
-    suggest.push({
-      title: '突出已匹配项',
-      detail: `已匹配 ${matched.length} 个关键词，建议在项目经历中给出具体应用场景与量化结果。`,
-    })
-  }
-  if (matchRate < 60) {
-    suggest.push({ title: '匹配度偏低', detail: '考虑调整简历重点，或寻找更贴合的岗位。' })
-  } else if (matchRate >= 80) {
-    suggest.push({ title: '匹配良好', detail: '可重点准备面试，强化项目深度与亮点。' })
-  }
-
-  jdMatchResult.value = { matchRate, matched, missing, suggest }
-  jdLoading.value = false
-  message.success('JD 匹配完成')
+  router.push({
+    path: '/app/copilot',
+    query: {
+      resume_id: resumeId.value ? String(resumeId.value) : undefined,
+      task,
+      project_index: projectIndex === undefined ? undefined : String(projectIndex),
+      jd: targetJd.value.trim() || undefined,
+      question,
+    },
+  })
 }
 
 const jdMatchColor = computed(() => {
@@ -289,24 +268,14 @@ const optStatus = reactive<Record<string, 'idle' | 'loading' | 'done'>>({
   work: 'idle', project: 'idle', skills: 'idle', summary: 'idle',
 })
 
-// 模拟 AI 优化：为经历描述补充量化指标
-const enhanceDescription = (text: string): string => {
-  if (!text) return text
-  if (/[0-9]+(%|万|倍|ms|次|秒|分)/.test(text)) return text
-  const lines = text.split('\n').filter(Boolean)
-  const quantifiers = ['提升 30%', '日均 100w+ 请求', '响应时间降低 40%', '可用性达 99.9%']
-  return lines.map((line, i) => `${line}，${quantifiers[i % quantifiers.length]}`).join('\n')
-}
-
-const optimizeItem = async (
-  key: keyof typeof optStatus,
-  apply: () => void,
-) => {
-  optStatus[key] = 'loading'
-  await new Promise((r) => setTimeout(r, 700))
-  apply()
-  optStatus[key] = 'done'
-  message.success('已应用 AI 优化')
+const optimizeItem = (key: keyof typeof optStatus) => {
+  const questions: Record<string, string> = {
+    work: '请帮我分析工作经历，指出哪些内容应该量化和如何改写。',
+    project: '请帮我找出项目经历中最值得强化的技术亮点。',
+    skills: '请根据当前目标岗位，帮我重组技能描述并指出缺失项。',
+    summary: '请根据当前简历生成一版真实、不夸大的个人简介候选文案。',
+  }
+  openCopilot('career_chat', undefined, questions[key])
 }
 
 const optimizeItems = computed(() => [
@@ -318,9 +287,7 @@ const optimizeItems = computed(() => [
     loading: optStatus.work === 'loading',
     statusText: optStatus.work === 'done' ? '已优化' : (optStatus.work === 'loading' ? '处理中' : '待优化'),
     statusClass: optStatus.work === 'done' ? 'st-done' : 'st-idle',
-    run: () => optimizeItem('work', () => {
-      resumeContent.work.forEach((w) => { w.description = enhanceDescription(w.description) })
-    }),
+    run: () => optimizeItem('work'),
   },
   {
     key: 'project',
@@ -330,9 +297,7 @@ const optimizeItems = computed(() => [
     loading: optStatus.project === 'loading',
     statusText: optStatus.project === 'done' ? '已优化' : (optStatus.project === 'loading' ? '处理中' : '待优化'),
     statusClass: optStatus.project === 'done' ? 'st-done' : 'st-idle',
-    run: () => optimizeItem('project', () => {
-      resumeContent.project.forEach((p) => { p.description = enhanceDescription(p.description) })
-    }),
+    run: () => openCopilot('project_optimize', 0),
   },
   {
     key: 'skills',
@@ -342,12 +307,7 @@ const optimizeItems = computed(() => [
     loading: optStatus.skills === 'loading',
     statusText: optStatus.skills === 'done' ? '已优化' : (optStatus.skills === 'loading' ? '处理中' : '待优化'),
     statusClass: optStatus.skills === 'done' ? 'st-done' : 'st-idle',
-    run: () => optimizeItem('skills', () => {
-      // 简单示例：在技能后追加「(熟练)」标记
-      resumeContent.skills.forEach((s) => {
-        if (!/[（(]\w+[)）]/.test(s.name)) s.name = `${s.name}（${s.proficiency || '熟练掌握'}）`
-      })
-    }),
+    run: () => optimizeItem('skills'),
   },
   {
     key: 'summary',
@@ -357,21 +317,12 @@ const optimizeItems = computed(() => [
     loading: optStatus.summary === 'loading',
     statusText: optStatus.summary === 'done' ? '已生成' : (optStatus.summary === 'loading' ? '处理中' : '待生成'),
     statusClass: optStatus.summary === 'done' ? 'st-done' : 'st-idle',
-    run: () => optimizeItem('summary', () => {
-      userProfileStore.updateBasic({
-        self_introduction: `${resumeContent.intention.position || '后端工程师'}，${resumeContent.work.length} 年工作经验，专注于${resumeContent.skills.slice(0, 2).map((s) => s.category).join('、')}方向，擅长高并发系统设计与性能优化。`,
-      })
-    }),
+    run: () => optimizeItem('summary'),
   },
 ])
 
 const optimizeAll = async () => {
-  optimizeLoading.value = true
-  for (const item of optimizeItems.value) {
-    await item.run()
-  }
-  optimizeLoading.value = false
-  message.success('AI 全部优化完成')
+  openCopilot('career_chat', undefined, '请从整体角度分析这份简历，给出最值得优先修改的三项建议。')
 }
 
 watch(() => resumeStore.currentVersion, (version) => {

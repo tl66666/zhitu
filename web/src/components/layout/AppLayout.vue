@@ -15,6 +15,7 @@ import {
   LockOutlined,
   MenuFoldOutlined,
   MenuUnfoldOutlined,
+  BulbOutlined,
 } from '@ant-design/icons-vue'
 
 const router = useRouter()
@@ -55,6 +56,7 @@ const currentRouteTitle = computed(() => {
     ResumeList: '简历实验室',
     ResumeTemplateSelect: '选择简历模板',
     ResumeEditor: '简历实验室',
+    Copilot: '求职 Copilot',
     InterviewList: '面试训练场',
     InterviewSceneSelect: '选择训练场景',
     InterviewRoom: '面试训练场',

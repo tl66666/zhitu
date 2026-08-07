@@ -23,6 +23,7 @@ type Deps struct {
 	AuthHandler      *handlers.AuthHandler
 	ProfileHandler   *handlers.ProfileHandler
 	ResumeHandler    *handlers.ResumeHandler
+	CopilotHandler   *handlers.CopilotHandler
 	InterviewHandler *handlers.InterviewHandler
 	DeliveryHandler  *handlers.DeliveryHandler
 	AdminHandler     *handlers.AdminHandler
@@ -132,6 +133,13 @@ func New(deps Deps) *gin.Engine {
 
 			// 同步档案
 			resumes.POST("/:id/sync-profile", deps.ResumeHandler.SyncProfile)
+		}
+
+		// ---------- 求职 Copilot ----------
+		copilot := v1.Group("/copilot")
+		{
+			copilot.POST("/chat", deps.CopilotHandler.Chat)
+			copilot.POST("/apply", deps.CopilotHandler.Apply)
 		}
 
 		// ---------- 模拟面试 ----------

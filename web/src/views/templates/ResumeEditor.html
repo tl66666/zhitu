@@ -197,6 +197,7 @@
                   <label class="field full"><span>项目成果（每行一条）</span><textarea v-model="item.description" rows="5" /></label>
                   <label class="field full"><span>技术栈（逗号分隔）</span><input :value="item.tech_stack.join(', ')" @input="updateTechStack(item, $event)" /></label>
                 </div>
+                <button class="project-copilot-button" type="button" @click="openCopilot('project_optimize', index)"><RocketOutlined /> 和 Copilot 优化这个项目</button>
               </article>
               <button class="add-item" type="button" @click="addProject"><PlusOutlined /> 添加项目经历</button>
             </div>
@@ -238,6 +239,7 @@
               <span>{{ t.label }}</span>
             </button>
           </div>
+          <button class="copilot-entry-button" type="button" @click="openCopilot('career_chat')"><RobotOutlined /> 打开独立求职 Copilot</button>
 
           <!-- AI 大模型分析 -->
           <div v-if="activeSmartTab === 'analysis'" class="smart-pane">
@@ -392,7 +394,7 @@
 
             <div v-else class="jd-empty">
               <FileSearchOutlined />
-              <p>粘贴 JD 后点击「开始匹配」</p>
+              <p>点击「开始匹配」进入 Copilot，对话分析优势和缺口</p>
             </div>
           </div>
 

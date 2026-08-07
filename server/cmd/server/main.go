@@ -50,6 +50,8 @@ func main() {
 	resumeSvc := services.NewResumeService(db, profileSvc)
 	resumeAISvc := services.NewResumeAIService(db, llmSvc, resumeSvc, profileSvc)
 	resumeHandler := handlers.NewResumeHandler(resumeSvc, resumeAISvc)
+	copilotSvc := services.NewResumeCopilotService(llmSvc, resumeSvc, profileSvc)
+	copilotHandler := handlers.NewCopilotHandler(copilotSvc)
 	interviewSvc := services.NewInterviewService(db, llmSvc, profileSvc, &cfg.Storage)
 	interviewHandler := handlers.NewInterviewHandler(interviewSvc)
 	deliverySvc := services.NewDeliveryService(db)
@@ -67,6 +69,7 @@ func main() {
 		AuthHandler:      authHandler,
 		ProfileHandler:   profileHandler,
 		ResumeHandler:    resumeHandler,
+		CopilotHandler:   copilotHandler,
 		InterviewHandler: interviewHandler,
 		DeliveryHandler:  deliveryHandler,
 		AdminHandler:     adminHandler,

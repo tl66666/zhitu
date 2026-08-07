@@ -200,6 +200,107 @@ export interface ParseResumeResult {
 
 // ==================== 简历相关 ====================
 
+export type CopilotTask = 'jd_match' | 'project_optimize' | 'interview_predict' | 'career_chat'
+
+export interface CopilotMessage {
+  role: 'user' | 'assistant'
+  content: string
+  created_at: string
+  result?: CopilotResponse
+}
+
+export interface CopilotRequirement {
+  title: string
+  priority: string
+  status: string
+  evidence: string[]
+  gap: string
+}
+
+export interface CopilotMatchResult {
+  match_score: number
+  strengths: string[]
+  missing_capabilities: string[]
+  requirement_map: CopilotRequirement[]
+  recommendations: string[]
+}
+
+export interface CopilotProjectResult {
+  current_issues: string[]
+  star_analysis: Record<string, string>
+  technical_highlights: string[]
+  missing_evidence: string[]
+  rewritten_description: string
+  rewritten_tech_stack: string[]
+}
+
+export interface CopilotInterviewQuestion {
+  question: string
+  type: string
+  priority: string
+  reason: string
+  answer_plan: string
+}
+
+export interface CopilotPredictionResult {
+  risk_points: string[]
+  resume_triggers: string[]
+  questions: CopilotInterviewQuestion[]
+}
+
+export interface CopilotProposal {
+  id: string
+  kind: string
+  title: string
+  rationale: string
+  project_index?: number
+  replacement_description?: string
+  replacement_tech_stack?: string[]
+}
+
+export interface CopilotResponse {
+  task: CopilotTask
+  reply: string
+  context: {
+    resume_id: number
+    version_id: number
+    resume_name: string
+    target_position: string
+    jd?: string
+    project_index?: number
+    using_draft: boolean
+  }
+  match?: CopilotMatchResult
+  project?: CopilotProjectResult
+  prediction?: CopilotPredictionResult
+  proposals?: CopilotProposal[]
+  memory_summary?: string
+}
+
+export interface CopilotSession {
+  id: string
+  resume_id: number | null
+  version_id: number | null
+  task: CopilotTask
+  jd: string
+  draft_content?: string
+  project_index?: number
+  messages: CopilotMessage[]
+  summary: string
+  created_at: string
+  updated_at: string
+}
+
+export interface CopilotChatRequest {
+  task: CopilotTask
+  resume_id: number
+  version_id?: number
+  jd?: string
+  project_index?: number
+  draft_content?: string
+  messages: Array<{ role: 'user' | 'assistant'; content: string }>
+}
+
 // 简历场景
 export type ResumeScene = 'manual' | 'jd' | 'scenario'
 
@@ -441,9 +542,12 @@ export type SSEEventType =
 export interface SSEEvent {
   type: SSEEventType
   content?: string
-  message?: string | InterviewMessage
+  message?: string | InterviewMessage | CopilotMessage
   interview?: Interview
   version?: ResumeVersion
+  result?: unknown
+  proposals?: CopilotProposal[]
+  memory_summary?: string
 }
 
 // SSE 回调接口
@@ -457,6 +561,12 @@ export interface SSECallbacks {
     interview?: Interview
   }) => void
   onError?: (message: string) => void
+  onCopilotDone?: (data: {
+    message?: CopilotMessage
+    result?: CopilotResponse
+    proposals?: CopilotProposal[]
+    memory_summary?: string
+  }) => void
 }
 
 // ==================== 投递看板相关 ====================
