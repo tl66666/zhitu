@@ -145,7 +145,7 @@ const showTextInput = computed(
   () => isTextMode.value || (isHybridMode.value && hybridInputMode.value === 'text')
 )
 const modeDescription = computed(() => {
-  if (isVoiceMode.value) return '像线上语音面试一样作答，松开按钮后会立即发送并进入下一轮。'
+  if (isVoiceMode.value) return '像线上语音面试一样作答，结束录音后会立即发送并进入下一轮。'
   if (isHybridMode.value) return '每道题可选择语音或文字作答，语音结束后会直接提交。'
   return '保持文字对话节奏，输入回答后发送，适合需要斟酌表达的题目。'
 })
