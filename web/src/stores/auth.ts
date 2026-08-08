@@ -53,8 +53,23 @@ export const useAuthStore = defineStore('auth', () => {
   // 注册
   const register = async (data: RegisterRequest) => {
     try {
-      await authApi.register(data)
-      message.success('注册成功，请登录')
+      const response = await authApi.register(data)
+      const authToken = response.data?.data?.token
+      if (!authToken) {
+        message.error('注册失败：未返回 token')
+        return false
+      }
+
+      token.value = authToken
+      user.value = {
+        id: 0,
+        email: data.email,
+        nickname: data.nickname || data.email.split('@')[0],
+        avatar: '',
+      }
+      await fetchUser()
+      message.success('注册成功')
+      router.push('/app')
       return true
     } catch (error) {
       console.error('注册失败:', error)

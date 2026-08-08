@@ -243,7 +243,7 @@ const validateConfirmPassword = async (_rule: Rule, value: string) => {
 }
 const loginRules: Record<string, Rule[]> = {
   email: [{ required: true, message: '请输入邮箱' }, { type: 'email', message: '请输入有效的邮箱地址' }],
-  password: [{ required: true, message: '请输入密码' }, { min: 6, message: '密码长度不能少于 6 位' }],
+  password: [{ required: true, message: '请输入密码' }, { min: 8, message: '密码长度不能少于 8 位' }],
 }
 const registerRules: Record<string, Rule[]> = {
   email: loginRules.email,
@@ -314,10 +314,7 @@ const handleRegister = async () => {
   loading.value = true
   try {
     if (await authStore.register({ email: registerForm.email, nickname: registerForm.nickname, password: registerForm.password })) {
-      loginForm.email = registerForm.email
-      loginForm.password = ''
-      activeTab.value = 'login'
-      message.info('请使用注册的账号登录')
+      authModalVisible.value = false
     }
   } finally { loading.value = false }
 }
