@@ -60,15 +60,40 @@ docs(prd): 更新面试官画像库的字段规则
 7. 测试通过 → 合并 PR；测试失败 → 评论说明问题
 ```
 
-### 自动化测试
+### 测试命令
 
-项目配置了 GitHub Actions CI，每次 PR 提交会自动运行：
+项目技术栈：后端 Go（Gin + GORM + SQLite），前端 Vue 3（TypeScript + Vite + Ant Design Vue + Tailwind CSS）。
 
-- 后端单元测试
-- 前端组件测试
-- 代码风格检查（lint）
+**后端测试与构建检查：**
 
-CI 全部通过是合并 PR 的前提条件。
+```bash
+# 运行后端全部单元测试
+cd server && go test ./...
+
+# 构建检查（静态分析 + 编译验证）
+cd server && go vet ./... && go build ./...
+```
+
+**前端类型检查与构建：**
+
+```bash
+# TypeScript 类型检查
+cd web && npm run check
+
+# 生产构建
+cd web && npm run build
+```
+
+提交 PR 前请确保以上命令全部通过。
+
+### 持续集成（CI）
+
+项目使用 GitHub Actions 作为 CI 平台。每次向 `main` 发起 PR 时，GitHub Actions 会自动触发以下检查：
+
+- 后端：`go vet` + `go build` + `go test ./...`
+- 前端：`npm run check`（类型检查）+ `npm run build`（构建验证）
+
+CI 全部通过是合并 PR 的前提条件。若 CI 失败，请在本地运行对应命令排查问题后重新推送。
 
 ## 分工原则
 
@@ -101,11 +126,18 @@ CI 全部通过是合并 PR 的前提条件。
 
 ## 数据库变更规范
 
+项目使用 GORM AutoMigrate 进行数据库表结构管理（后端 Go + GORM + SQLite），不使用独立的 migration 脚本工具。
+
 数据库 schema 变更流程：
 
 1. 在群里提出变更需求，说明原因和影响范围
-2. 讨论确认后，在对应分支编写 migration 脚本
-3. PR 中包含 migration 脚本和对应的 model 更新
-4. 合并后所有成员执行 `alembic upgrade head` 同步本地数据库
+2. 在 `server/internal/models/` 下新增或修改模型结构体（定义 GORM tag）
+3. 在 `server/internal/database/database.go` 的 `autoMigrate` 函数中注册新增的模型
+4. PR 中包含 model 更新和对应的测试代码
+5. 合并后重启服务，GORM AutoMigrate 会自动同步表结构（建表、补字段）
 
-禁止直接在代码中硬编码 SQL 修改表结构，所有变更通过 migration 脚本管理。
+注意事项：
+
+- GORM AutoMigrate 只会**新增**列和表，**不会删除**列或修改列类型。如需删除字段，请在群里讨论后手动处理。
+- 禁止直接在代码中硬编码 SQL 修改表结构，所有表结构变更通过 model 定义 + AutoMigrate 管理。
+- 涉及外键关系的模型变更，注意 `autoMigrate` 中的注册顺序（被依赖的表先注册）。
