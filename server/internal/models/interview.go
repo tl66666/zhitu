@@ -18,8 +18,9 @@ type Interview struct {
 	TrainingFocus     string     `gorm:"size:500" json:"training_focus"`
 	Difficulty        string     `gorm:"size:20;default:mid" json:"difficulty"` // junior/mid/senior/mixed
 	TotalQuestions    int        `gorm:"default:8" json:"total_questions"`
-	Mode              string     `gorm:"size:20;default:hybrid" json:"mode"`      // text/voice/hybrid
-	Status            string     `gorm:"size:20;default:preparing" json:"status"` // preparing/ongoing/completed/cancelled
+	Mode              string     `gorm:"size:20;default:hybrid" json:"mode"`            // text/voice/hybrid
+	Status            string     `gorm:"size:20;default:preparing;index" json:"status"` // preparing/starting/ongoing/reviewing/completed/report_failed/cancelled
+	StatusMessage     string     `gorm:"size:500" json:"status_message"`
 	CurrentQuestionNo int        `gorm:"default:0" json:"current_question_no"`
 	StartedAt         *time.Time `json:"started_at,omitempty"`
 	EndedAt           *time.Time `json:"ended_at,omitempty"`

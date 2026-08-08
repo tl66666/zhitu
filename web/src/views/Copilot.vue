@@ -1,20 +1,5 @@
 <template>
   <div class="copilot-page">
-    <header class="copilot-header page-header">
-      <div class="page-title-group">
-        <div class="page-title-line">
-          <h1 class="page-title">求职 Copilot</h1>
-          <a-button class="history-toggle" type="text" @click="showHistory = true">
-            <HistoryOutlined />
-            <span>历史记录</span>
-            <small v-if="copilotStore.sessions.length">{{ copilotStore.sessions.length }}</small>
-          </a-button>
-        </div>
-        <p class="page-desc subtitle">围绕你的真实简历和目标岗位，分析差距、打磨项目、预测面试。</p>
-      </div>
-      <a-button class="clear-button" @click="clearLocalSessions">清除对话记录</a-button>
-    </header>
-
     <a-drawer
       v-model:open="showHistory"
       title="对话记录"
@@ -36,12 +21,15 @@
         </button>
         <a-empty v-if="!copilotStore.sessions.length" :image="false" description="还没有对话记录" />
       </div>
+      <template #footer>
+        <a-button block @click="clearLocalSessions">清除全部记录</a-button>
+      </template>
     </a-drawer>
 
     <div class="copilot-layout">
       <aside class="copilot-sidebar">
         <section class="context-panel">
-          <div class="panel-title"><span>工作上下文</span><small>仅用于当前对话</small></div>
+          <div class="panel-title">工作上下文</div>
           <a-select v-model:value="selectedResumeId" allow-clear placeholder="选择简历，或清空后使用粘贴内容" :loading="loadingResumes" @change="handleResumeChange">
             <a-select-option v-for="resume in resumes" :key="resume.id" :value="resume.id">{{ resume.name }}</a-select-option>
           </a-select>
@@ -49,7 +37,7 @@
             <a-select-option v-for="version in versions" :key="version.id" :value="version.id">{{ version.version_label }}</a-select-option>
           </a-select>
           <a-textarea v-model:value="jd" :rows="5" placeholder="粘贴目标岗位 JD（匹配和面试预测需要）" />
-          <a-textarea v-model:value="resumePaste" :rows="3" placeholder="没有现成简历时可直接粘贴；已有简历可补充一段经历或数据" />
+          <a-textarea v-model:value="resumePaste" :rows="3" placeholder="没有现成简历时可直接粘贴" />
           <label class="file-input"><UploadOutlined /> 上传 TXT / Markdown 简历 <input type="file" accept=".txt,.md,text/plain,text/markdown" @change="handleResumeFile" /></label>
           <div class="context-chip" v-if="selectedResume">
             <FileTextOutlined /> {{ selectedResume.name }} · {{ selectedVersionLabel }}
@@ -57,10 +45,10 @@
         </section>
 
         <section class="task-panel">
-          <div class="panel-title"><span>选择任务</span><small>每个任务独立记忆</small></div>
+          <div class="panel-title">选择任务</div>
           <button v-for="item in taskItems" :key="item.key" type="button" class="task-button" :class="{ active: task === item.key }" @click="switchTask(item.key)">
             <component :is="item.icon" />
-            <span><strong>{{ item.title }}</strong><small>{{ item.description }}</small></span>
+            <span>{{ item.title }}</span>
           </button>
         </section>
       </aside>
@@ -71,24 +59,20 @@
           <a-select v-if="currentContent.project.length" v-model:value="projectIndex" placeholder="选择一个项目">
             <a-select-option v-for="(project, index) in currentContent.project" :key="index" :value="index">{{ project.name || `项目 ${index + 1}` }}</a-select-option>
           </a-select>
-          <div v-else class="project-empty"><InfoCircleOutlined /> 当前简历没有项目经历，请先补充项目内容后再分析</div>
+          <div v-else class="project-empty"><InfoCircleOutlined /> 当前简历没有项目经历</div>
         </div>
         <div class="chat-shell">
           <div class="chat-title">
-            <div class="chat-title-content">
-              <span class="chat-kicker">当前任务</span>
-              <div class="chat-title-line">
-                <strong>{{ taskLabel(task) }}</strong>
-                <span v-if="activeSession" class="service-status"><i />服务端 AI 分析</span>
-              </div>
+            <strong>{{ taskLabel(task) }}</strong>
+            <div class="chat-title-actions">
+              <a-button type="text" @click="showHistory = true"><HistoryOutlined /> 历史</a-button>
+              <a-button v-if="activeSession" type="text" @click="newConversation">新对话</a-button>
             </div>
-            <a-button v-if="activeSession" type="text" @click="newConversation">新对话</a-button>
           </div>
-          <div class="chat-messages">
+          <div ref="messagesRef" class="chat-messages">
             <div v-if="!activeSession || !activeSession.messages.length" class="chat-welcome">
               <RobotOutlined />
               <h2>{{ welcomeTitle }}</h2>
-              <p>{{ welcomeDescription }}</p>
               <div class="prompt-row">
                 <button v-for="prompt in quickPrompts" :key="prompt" type="button" :disabled="!hasValidProject" @click="sendMessage(prompt)">{{ prompt }}</button>
               </div>
@@ -123,11 +107,11 @@
                 </div>
               </div>
             </article>
-            <div v-if="copilotStore.loading" class="typing"><LoadingOutlined /> Copilot 正在整理建议…</div>
+            <div v-if="copilotStore.loading" class="typing"><span class="typing-dots"><i></i><i></i><i></i></span></div>
           </div>
           <div class="composer">
             <a-textarea v-model:value="input" :rows="3" :disabled="copilotStore.loading" :placeholder="composerPlaceholder" @keydown.enter.exact="handleEnter" />
-            <div class="composer-foot"><span>消息将发送至服务端，由 AI 模型结合简历内容分析</span><a-button type="primary" :loading="copilotStore.loading" :disabled="!canSend" @click="sendMessage()"><SendOutlined />发送</a-button></div>
+            <div class="composer-foot"><a-button type="primary" :loading="copilotStore.loading" :disabled="!canSend" @click="sendMessage()"><SendOutlined />发送</a-button></div>
           </div>
         </div>
       </main>
@@ -136,10 +120,10 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { message } from 'ant-design-vue'
-import { BulbOutlined, FileSearchOutlined, HistoryOutlined, InfoCircleOutlined, LoadingOutlined, MessageOutlined, RobotOutlined, RocketOutlined, SendOutlined, FileTextOutlined, UploadOutlined } from '@ant-design/icons-vue'
+import { BulbOutlined, FileSearchOutlined, HistoryOutlined, InfoCircleOutlined, MessageOutlined, RobotOutlined, RocketOutlined, SendOutlined, FileTextOutlined, UploadOutlined } from '@ant-design/icons-vue'
 import { listResumes, listVersions, getVersion } from '@/api/resume'
 import { applyCopilotProposal } from '@/api/copilot'
 import { useCopilotStore } from '@/stores/copilot'
@@ -162,6 +146,7 @@ const projectIndex = ref(0)
 const input = ref('')
 const applying = ref(false)
 const showHistory = ref(false)
+const messagesRef = ref<HTMLElement | null>(null)
 
 const escapeMessageHtml = (content: string): string =>
   content.replace(/[&<>"']/g, (character) => {
@@ -190,10 +175,10 @@ const hasResumeContext = computed(() => Boolean(selectedResumeId.value || resume
 const canSend = computed(() => Boolean(input.value.trim()) && hasResumeContext.value && hasValidProject.value)
 
 const taskItems = [
-  { key: 'jd_match' as const, title: '简历-JD 匹配', description: '看清优势和缺口', icon: FileSearchOutlined },
-  { key: 'project_optimize' as const, title: '项目经历优化', description: '按 STAR 打磨文案', icon: RocketOutlined },
-  { key: 'interview_predict' as const, title: '岗位风险预测', description: '提前准备高频问题', icon: BulbOutlined },
-  { key: 'career_chat' as const, title: '求职问答', description: '自由聊求职问题', icon: MessageOutlined },
+  { key: 'jd_match' as const, title: '简历-JD 匹配', icon: FileSearchOutlined },
+  { key: 'project_optimize' as const, title: '项目经历优化', icon: RocketOutlined },
+  { key: 'interview_predict' as const, title: '岗位风险预测', icon: BulbOutlined },
+  { key: 'career_chat' as const, title: '求职问答', icon: MessageOutlined },
 ]
 
 const currentVersion = computed(() => versions.value.find((item) => item.id === selectedVersionId.value))
@@ -225,6 +210,12 @@ const sessionDraftContent = computed(() => {
 
 const taskLabel = (value: CopilotTask) => taskItems.find((item) => item.key === value)?.title || value
 const formatTime = (value: string) => new Date(value).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
+
+const scrollToBottom = () => {
+  nextTick(() => {
+    if (messagesRef.value) messagesRef.value.scrollTop = messagesRef.value.scrollHeight
+  })
+}
 
 const loadVersionContent = async () => {
   if (!selectedResumeId.value || !selectedVersionId.value) return
@@ -298,6 +289,7 @@ const selectExistingSession = (id: string) => {
   if (!selectedResumeId.value && (draftOverride.value || resumePaste.value)) updateCurrentContent(draftOverride.value || resumePaste.value)
   projectIndex.value = session.project_index || 0
   if (selectedResumeId.value) void loadVersionsForResume(selectedResumeId.value, session.version_id)
+  scrollToBottom()
 }
 
 const ensureSession = async () => {
@@ -351,7 +343,6 @@ const applyProposal = async (proposal: CopilotProposal) => {
 }
 
 const welcomeTitle = computed(() => task.value === 'career_chat' ? '先问一个求职问题' : `开始${taskLabel(task.value)}`)
-const welcomeDescription = computed(() => task.value === 'project_optimize' ? '选择项目后，我会先指出 STAR 结构和证据缺口，再和你一起改写。' : '我会读取当前简历上下文，给出可验证、可执行的建议。')
 const composerPlaceholder = computed(() => task.value === 'career_chat' ? '例如：大三找实习，简历需要写几个项目？' : '告诉我你最关心的部分，支持继续追问和反驳…')
 const quickPrompts = computed(() => task.value === 'jd_match' ? ['先给我一个匹配度结论', '哪些经历应该优先强化？'] : task.value === 'project_optimize' ? ['先分析这个项目的问题', '按实习校招风格改写'] : task.value === 'interview_predict' ? ['列出最高频的技术问题', '哪些简历细节最容易被追问？'] : ['Agent 项目简历怎么写？', '大三找实习要准备什么？'])
 
@@ -370,6 +361,9 @@ const handleResumeFile = async (event: Event) => {
 watch(resumePaste, (value) => {
   if (!selectedResumeId.value && value.trim()) updateCurrentContent(value)
 })
+
+watch(() => activeSession.value?.messages.length, scrollToBottom)
+watch(() => copilotStore.loading, scrollToBottom)
 
 onMounted(async () => {
   await copilotStore.init()
@@ -414,108 +408,30 @@ onMounted(async () => {
 <style scoped>
 .copilot-page {
   width: 100%;
-  min-height: calc(100dvh - 64px);
-  color: var(--foreground);
-}
-
-.copilot-header {
-  max-width: 1480px;
-  margin: 0 auto 24px;
-  padding-bottom: 18px;
-  border-bottom: 1px solid var(--border);
-}
-
-.page-title-group {
-  gap: 6px;
-}
-
-.page-title-line {
+  height: 100%;
   display: flex;
-  align-items: center;
-  gap: 12px;
-  flex-wrap: wrap;
-}
-
-.copilot-header .page-title {
-  margin: 0;
+  flex-direction: column;
+  overflow: hidden;
+  padding: 16px 20px;
   color: var(--foreground);
-  font-family: var(--font-sans);
-  font-size: 32px;
-  font-weight: 720;
-  letter-spacing: -0.045em;
-  line-height: 1.12;
-}
-
-.copilot-header :deep(.history-toggle) {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  height: 30px;
-  padding: 0 12px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-  background: var(--card);
-  color: var(--muted-foreground);
-  font-size: 12px;
-  font-weight: 500;
-  transition: border-color 0.16s ease, color 0.16s ease, background-color 0.16s ease;
-}
-
-.copilot-header :deep(.history-toggle:hover) {
-  border-color: var(--primary);
-  color: var(--primary);
-  background: var(--brand-50);
-}
-
-.copilot-header :deep(.history-toggle small) {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 18px;
-  height: 16px;
-  padding: 0 5px;
-  border-radius: 8px;
-  background: var(--background-100);
-  color: var(--muted-foreground);
-  font-size: 10px;
-  font-weight: 600;
-}
-
-.copilot-header :deep(.history-toggle:hover small) {
-  background: var(--brand-100);
-  color: var(--primary);
-}
-
-.copilot-header .page-desc {
-  margin: 8px 0 0;
-  color: var(--muted-foreground);
-  line-height: 1.5;
-}
-
-.copilot-header :deep(.clear-button) {
-  border-color: var(--border);
-  color: var(--foreground);
-  background: var(--card);
-}
-
-.copilot-header :deep(.clear-button:hover) {
-  color: var(--primary);
-  border-color: var(--primary);
 }
 
 .copilot-layout {
-  max-width: 1480px;
-  margin: 0 auto;
+  flex: 1;
+  min-height: 0;
   display: grid;
   grid-template-columns: minmax(260px, 300px) minmax(0, 1fr);
-  align-items: start;
-  gap: 20px;
+  align-items: stretch;
+  gap: 16px;
+  overflow: hidden;
 }
 
 .copilot-sidebar {
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 12px;
+  min-height: 0;
+  overflow: auto;
 }
 
 .context-panel,
@@ -525,12 +441,11 @@ onMounted(async () => {
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
   background: var(--card);
-  box-shadow: none;
 }
 
 .context-panel,
 .task-panel {
-  padding: 16px;
+  padding: 14px;
 }
 
 .context-panel {
@@ -540,21 +455,10 @@ onMounted(async () => {
 }
 
 .panel-title {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
   margin-bottom: 2px;
   color: var(--foreground);
   font-size: 13px;
   font-weight: 700;
-}
-
-.panel-title small {
-  color: var(--muted-foreground);
-  font-size: 11px;
-  font-weight: 400;
-  white-space: nowrap;
 }
 
 .context-panel :deep(.ant-select),
@@ -612,7 +516,7 @@ onMounted(async () => {
 .task-panel {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 4px;
 }
 
 .task-button,
@@ -631,7 +535,9 @@ onMounted(async () => {
   align-items: center;
   gap: 10px;
   width: 100%;
-  padding: 10px;
+  padding: 9px 10px;
+  font-size: 13px;
+  font-weight: 500;
 }
 
 .task-button:hover,
@@ -643,36 +549,13 @@ onMounted(async () => {
 .task-button svg {
   flex: 0 0 auto;
   color: var(--primary);
-  font-size: 18px;
-}
-
-.task-button span {
-  display: flex;
-  min-width: 0;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.task-button strong {
-  font-size: 13px;
-  font-weight: 600;
-}
-
-.task-button small,
-.history-item small {
-  color: var(--muted-foreground);
-  font-size: 11px;
+  font-size: 16px;
 }
 
 .task-button.active {
   border-color: var(--primary);
   background: var(--brand-50);
   color: var(--primary);
-}
-
-.task-button.active small {
-  color: var(--primary);
-  opacity: 0.78;
 }
 
 .history-item {
@@ -682,7 +565,6 @@ onMounted(async () => {
   justify-content: space-between;
   gap: 10px;
   padding: 9px 10px;
-  color: var(--foreground);
   font-size: 12px;
 }
 
@@ -690,6 +572,12 @@ onMounted(async () => {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.history-item small {
+  color: var(--muted-foreground);
+  font-size: 11px;
   white-space: nowrap;
 }
 
@@ -707,6 +595,10 @@ onMounted(async () => {
 
 .copilot-main {
   min-width: 0;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
 }
 
 .project-picker {
@@ -738,7 +630,8 @@ onMounted(async () => {
 }
 
 .chat-shell {
-  min-height: 680px;
+  flex: 1;
+  min-height: 0;
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -748,72 +641,50 @@ onMounted(async () => {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 16px;
-  min-height: 68px;
-  padding: 13px 18px;
+  gap: 12px;
+  min-height: 52px;
+  padding: 10px 16px;
   border-bottom: 1px solid var(--border);
   background: var(--background-100);
 }
 
-.chat-title-content {
-  min-width: 0;
-}
-
-.chat-kicker {
-  display: block;
-  margin-bottom: 4px;
-  color: var(--muted-foreground);
-  font-size: 11px;
-  letter-spacing: 0.04em;
-}
-
-.chat-title-line {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 9px;
-}
-
-.chat-title-line strong {
+.chat-title strong {
   color: var(--foreground);
-  font-size: 16px;
+  font-size: 15px;
   font-weight: 650;
 }
 
-.service-status {
-  display: inline-flex;
+.chat-title-actions {
+  display: flex;
   align-items: center;
-  gap: 5px;
-  color: var(--muted-foreground);
-  font-size: 12px;
-  font-weight: 400;
+  gap: 4px;
 }
 
-.service-status i {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: #2b9a62;
+.chat-title-actions :deep(.ant-btn) {
+  height: 30px;
+  padding: 0 10px;
+  color: var(--muted-foreground);
+  font-size: 12px;
+}
+
+.chat-title-actions :deep(.ant-btn:hover) {
+  color: var(--primary);
 }
 
 .chat-messages {
   flex: 1;
-  min-height: 400px;
-  max-height: calc(100dvh - 300px);
+  min-height: 0;
   overflow: auto;
-  padding: 24px clamp(18px, 3vw, 34px);
+  padding: 20px clamp(16px, 3vw, 32px);
   background: var(--card);
 }
 
 .chat-welcome {
-  max-width: 620px;
-  margin: 72px auto 0;
-  padding: 30px 24px;
-  border: 1px dashed var(--border);
-  border-radius: var(--radius-lg);
-  background: var(--background-100);
-  color: var(--muted-foreground);
+  max-width: 560px;
+  margin: 60px auto 0;
+  padding: 28px 24px;
   text-align: center;
+  color: var(--muted-foreground);
 }
 
 .chat-welcome > svg {
@@ -822,16 +693,10 @@ onMounted(async () => {
 }
 
 .chat-welcome h2 {
-  margin: 12px 0 6px;
+  margin: 12px 0 0;
   color: var(--foreground);
-  font-size: 20px;
+  font-size: 18px;
   font-weight: 650;
-}
-
-.chat-welcome p {
-  max-width: 480px;
-  margin: 0 auto;
-  line-height: 1.65;
 }
 
 .prompt-row {
@@ -839,11 +704,11 @@ onMounted(async () => {
   flex-wrap: wrap;
   justify-content: center;
   gap: 8px;
-  margin-top: 20px;
+  margin-top: 18px;
 }
 
 .prompt-row button {
-  padding: 8px 11px;
+  padding: 7px 12px;
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
   background: var(--card);
@@ -870,7 +735,7 @@ onMounted(async () => {
 .chat-message {
   display: flex;
   gap: 10px;
-  margin-bottom: 22px;
+  margin-bottom: 20px;
 }
 
 .chat-message.user {
@@ -895,7 +760,7 @@ onMounted(async () => {
 }
 
 .message-body {
-  max-width: min(820px, 85%);
+  max-width: min(760px, 85%);
 }
 
 .chat-message.user .message-body {
@@ -904,7 +769,7 @@ onMounted(async () => {
 }
 
 .message-content {
-  padding: 12px 15px;
+  padding: 11px 15px;
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
   background: var(--background-100);
@@ -1030,69 +895,82 @@ onMounted(async () => {
 }
 
 .typing {
-  padding: 0 22px 12px;
-  color: var(--muted-foreground);
-  font-size: 12px;
+  display: flex;
+  padding: 0 0 16px;
+}
+
+.typing-dots {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 10px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--background-100);
+}
+
+.typing-dots i {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--muted-foreground);
+  animation: typing-bounce 1.2s infinite ease-in-out;
+}
+
+.typing-dots i:nth-child(2) { animation-delay: 0.15s; }
+.typing-dots i:nth-child(3) { animation-delay: 0.3s; }
+
+@keyframes typing-bounce {
+  0%, 60%, 100% { opacity: 0.3; transform: translateY(0); }
+  30% { opacity: 1; transform: translateY(-3px); }
 }
 
 .composer {
-  padding: 15px 18px 17px;
+  padding: 12px 16px 14px;
   border-top: 1px solid var(--border);
   background: var(--card);
 }
 
 .composer :deep(.ant-input) {
-  min-height: 78px;
+  min-height: 72px;
   resize: vertical;
 }
 
 .composer-foot {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-end;
   gap: 10px;
-  margin-top: 9px;
-  color: var(--muted-foreground);
-  font-size: 11px;
+  margin-top: 8px;
 }
 
 @media (max-width: 1100px) {
   .copilot-layout {
-    grid-template-columns: 270px minmax(0, 1fr);
+    grid-template-columns: 260px minmax(0, 1fr);
   }
 }
 
 @media (max-width: 900px) {
   .copilot-layout {
     grid-template-columns: 1fr;
+    grid-template-rows: auto 1fr;
   }
 
   .copilot-sidebar {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
     align-items: start;
-  }
-
-  .chat-messages {
-    max-height: none;
+    overflow: visible;
   }
 }
 
 @media (max-width: 600px) {
-  .copilot-header {
-    display: block;
-  }
-
-  .copilot-header :deep(.clear-button) {
-    margin-top: 14px;
+  .copilot-page {
+    padding: 10px 12px;
   }
 
   .copilot-sidebar {
     display: flex;
-  }
-
-  .page-title-line {
-    align-items: flex-start;
   }
 
   .project-picker {
@@ -1107,15 +985,6 @@ onMounted(async () => {
 
   .result-columns {
     grid-template-columns: 1fr;
-  }
-
-  .composer-foot {
-    align-items: flex-end;
-    flex-direction: column;
-  }
-
-  .chat-shell {
-    min-height: 620px;
   }
 }
 </style>

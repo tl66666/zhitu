@@ -85,7 +85,7 @@
                   <!-- 操作列：文字按钮 -->
                   <td>
                     <button class="action-btn" @click="enterRoom(record.id)">
-                      {{ record.status === 'completed' ? '查看复盘' : '继续面试' }}
+                      {{ record.status === 'completed' ? '查看复盘' : record.status === 'cancelled' ? '查看详情' : record.status === 'reviewing' || record.status === 'report_failed' ? '查看进度' : record.status === 'preparing' ? '进入候场' : '继续面试' }}
                     </button>
                   </td>
                 </tr>
@@ -185,8 +185,11 @@ const modeStyle = (m: InterviewMode | string): { background: string; color: stri
 const statusLabel = (s: InterviewStatus | string): string => {
   const map: Record<string, string> = {
     preparing: '准备中',
+    starting: '正在开场',
     ongoing: '进行中',
+    reviewing: '生成复盘中',
     completed: '已完成',
+    report_failed: '复盘失败',
     cancelled: '已取消',
   }
   return map[s] || s
@@ -451,6 +454,11 @@ onMounted(() => {
 .status-dot.status-completed {
   background: var(--state-success);
 }
+
+.status-dot.status-preparing { background: var(--background-500); }
+.status-dot.status-starting,
+.status-dot.status-reviewing { background: var(--primary); animation: pulse-blue 1.8s infinite; }
+.status-dot.status-report_failed { background: var(--state-error); }
 
 /* 已取消：灰色 */
 .status-dot.status-cancelled {

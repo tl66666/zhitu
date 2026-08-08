@@ -104,6 +104,10 @@
               <a-input v-model:value="form.targetPosition" :placeholder="selectedSceneData.positionPlaceholder" />
             </label>
             <label>
+              <span>目标公司</span>
+              <a-input v-model:value="form.targetCompany" placeholder="例如：目标企业（可选）" />
+            </label>
+            <label>
               <span>难度</span>
               <a-select v-model:value="form.difficulty">
                 <a-select-option value="junior">基础</a-select-option>
@@ -120,14 +124,32 @@
               </a-select>
             </label>
             <label>
-              <span>面试模式</span>
-              <a-radio-group v-model:value="form.mode" button-style="solid">
-                <a-radio-button value="text">文字</a-radio-button>
-                <a-radio-button value="voice">语音</a-radio-button>
-                <a-radio-button value="hybrid">混合</a-radio-button>
-              </a-radio-group>
+              <span>面试题数</span>
+              <a-select v-model:value="form.totalQuestions">
+                <a-select-option :value="5">5 题 · 快速演练</a-select-option>
+                <a-select-option :value="8">8 题 · 标准面试</a-select-option>
+                <a-select-option :value="10">10 题 · 深度模拟</a-select-option>
+              </a-select>
             </label>
           </div>
+
+          <fieldset class="mode-field">
+            <legend>面试形式</legend>
+            <div class="mode-options">
+              <button
+                v-for="option in modeOptions"
+                :key="option.value"
+                type="button"
+                :class="['mode-option', { selected: form.mode === option.value }]"
+                :aria-pressed="form.mode === option.value"
+                @click="form.mode = option.value"
+              >
+                <component :is="option.icon" />
+                <span><strong>{{ option.label }}</strong><small>{{ option.description }}</small></span>
+                <CheckCircleFilled v-if="form.mode === option.value" class="mode-check" />
+              </button>
+            </div>
+          </fieldset>
 
           <label class="topic-field">
             <span>训练重点（可选）</span>
@@ -143,7 +165,7 @@
           <button class="enter-button" :disabled="creating || !canCreate" @click="createInterview">
             <LoadingOutlined v-if="creating" />
             <PlayCircleOutlined v-else />
-            {{ creating ? '正在布置考场' : `进入${selectedSceneData.title}` }}
+            {{ creating ? '正在创建面试' : '创建并进入候场' }}
           </button>
         </div>
       </section>
@@ -154,7 +176,14 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { PlayCircleOutlined, LoadingOutlined } from '@ant-design/icons-vue'
+import {
+  AudioOutlined,
+  CheckCircleFilled,
+  KeyOutlined,
+  LoadingOutlined,
+  PlayCircleOutlined,
+  SwapOutlined,
+} from '@ant-design/icons-vue'
 import { message } from 'ant-design-vue'
 import { useInterviewStore } from '@/stores/interview'
 import { listResumes, listVersions } from '@/api/resume'
@@ -182,6 +211,7 @@ const creating = ref(false)
 const form = reactive<{
   direction: string
   targetPosition: string
+  targetCompany: string
   difficulty: InterviewDifficulty
   examinerStyle: string
   topic: string
@@ -189,9 +219,11 @@ const form = reactive<{
   resumeId: number | null
   versionId: number
   mode: InterviewMode
+  totalQuestions: number
 }>({
   direction: '教师资格证面试',
   targetPosition: '小学语文教师',
+  targetCompany: '',
   difficulty: 'mid',
   examinerStyle: '标准规范',
   topic: '',
@@ -199,7 +231,19 @@ const form = reactive<{
   resumeId: null,
   versionId: 0,
   mode: 'hybrid',
+  totalQuestions: 8,
 })
+
+const modeOptions: Array<{
+  value: InterviewMode
+  label: string
+  description: string
+  icon: typeof KeyOutlined
+}> = [
+  { value: 'text', label: '文字面试', description: '全程键盘作答，适合安静复盘', icon: KeyOutlined },
+  { value: 'voice', label: '语音面试', description: '模拟真实通话，训练临场表达', icon: AudioOutlined },
+  { value: 'hybrid', label: '混合面试', description: '语音与文字可按题灵活选择', icon: SwapOutlined },
+]
 
 const resumes = ref<Resume[]>([])
 const versions = ref<ResumeVersion[]>([])
@@ -289,13 +333,13 @@ const createInterview = async () => {
     const scene = selectedSceneData.value
     const interview = await interviewStore.create({
       scene: scene.key,
-      target_company: '',
+      target_company: form.targetCompany.trim(),
       target_position: form.targetPosition.trim() || scene.defaultPosition,
       target_jd: form.targetJd.trim(),
       resume_id: form.resumeId,
       version_id: form.versionId || undefined,
       difficulty: form.difficulty,
-      total_questions: 5,
+      total_questions: form.totalQuestions,
       mode: form.mode,
       examiner_style: form.examinerStyle,
       training_focus: `${form.direction}；${topic}；流程：${scene.steps.join('、')}`,
@@ -321,21 +365,22 @@ onMounted(() => {
 h1{margin:0;font-family:"Songti SC","STSong",serif;font-size:clamp(38px,4.2vw,64px);font-weight:600;line-height:1.12;letter-spacing:-.04em}
 .scene-layout{box-sizing:border-box;width:100%;max-width:1440px;margin:auto}
 .scene-library{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin-bottom:20px}
-.scene-card{position:relative;isolation:isolate;min-height:164px;overflow:hidden;border:1px solid rgba(255,255,255,.4);background-image:url('/scenes/interview-scenes-atlas.jpg');background-size:400% 300%;display:grid;grid-template-columns:1fr auto;align-content:end;gap:4px 12px;padding:18px;text-align:left;color:#fff;cursor:pointer;box-shadow:0 8px 24px rgba(24,48,41,.09);transition:transform .22s ease,box-shadow .22s ease}
+.scene-card{position:relative;isolation:isolate;min-height:164px;overflow:hidden;border:1px solid rgba(255,255,255,.4);background-image:url('/scenes/interview-scenes-atlas.jpg');background-size:400% auto;display:grid;grid-template-columns:1fr auto;align-content:end;gap:4px 12px;padding:18px;text-align:left;color:#fff;cursor:pointer;box-shadow:0 8px 24px rgba(24,48,41,.09);transition:transform .22s ease,box-shadow .22s ease}
 .scene-shade{position:absolute;z-index:-1;inset:0;background:linear-gradient(180deg,transparent 28%,rgba(9,25,20,.82) 100%)}
 .scene-card:hover,.scene-card.selected{transform:translateY(-3px);box-shadow:0 14px 30px rgba(24,48,41,.18)}.scene-card.selected{outline:3px solid #b45c36;outline-offset:-3px}
 .scene-number{position:absolute;left:14px;top:12px;padding:5px 7px;background:rgba(12,35,28,.76);font-size:11px}.scene-status{align-self:end;padding:4px 7px;background:#b45c36;font-size:10px}.scene-copy{display:flex;flex-direction:column;gap:3px}.scene-copy strong{font-size:15px}.scene-copy small{color:#dce5df}
 .classroom-panel{width:100%;min-width:0;background:#f8f8f3;border:1px solid #cbd2cc;display:grid;grid-template-columns:minmax(0,1.15fr) minmax(320px,.85fr);box-shadow:0 22px 60px rgba(28,56,47,.09)}
-.scenario-preview{position:relative;isolation:isolate;min-height:520px;overflow:hidden;background-image:url('/scenes/interview-scenes-atlas.jpg');background-size:400% 300%;color:#fff}
+.scenario-preview{position:relative;isolation:isolate;min-height:520px;overflow:hidden;background-image:url('/scenes/interview-scenes-atlas.jpg');background-size:400% auto;color:#fff}
 .preview-shade{position:absolute;z-index:-1;inset:0;background:linear-gradient(180deg,rgba(9,27,22,.08),rgba(9,27,22,.86))}
 .preview-number{position:absolute;left:28px;top:26px;padding:7px 9px;background:rgba(16,45,37,.82);font-size:12px;letter-spacing:.12em}
 .preview-copy{position:absolute;left:38px;right:38px;bottom:82px}.preview-copy span{color:#e8d2c7;font-size:12px;letter-spacing:.08em}.preview-copy strong{display:block;margin:9px 0 12px;font-family:"Songti SC",serif;font-size:clamp(38px,4vw,58px);line-height:1}.preview-copy p{max-width:520px;margin:0;color:#e1e9e4;font-size:15px;line-height:1.7}
 .room-caption{position:absolute;left:38px;bottom:28px;padding:9px 12px;background:rgba(19,48,40,.9);color:#fff;font-size:12px}.live-dot{display:inline-block;width:7px;height:7px;margin-right:7px;border-radius:50%;background:#e46d43}
 .config-panel{padding:34px;display:flex;flex-direction:column}.config-heading{display:flex;justify-content:space-between;gap:20px;border-bottom:1px solid #d8ddd8;padding-bottom:22px}.config-heading p{margin:0 0 4px;color:#b45c36;font-size:12px;font-weight:700}.config-heading h2{margin:0;font-family:"Songti SC",serif;font-size:28px}.config-heading>span{color:#6d7c76;font-size:12px}
 .field-grid{display:grid;grid-template-columns:1fr 1fr;gap:18px 14px;margin-top:24px}.field-grid label,.topic-field{display:flex;flex-direction:column;gap:7px}.field-grid label>span,.topic-field>span{font-size:12px;color:#5c6e67}.field-grid :deep(.ant-select){width:100%}.topic-field{margin-top:18px}
+.mode-field{margin:20px 0 0;padding:0;border:0}.mode-field legend{padding:0;color:#5c6e67;font-size:12px}.mode-options{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin-top:8px}.mode-option{position:relative;display:flex;align-items:flex-start;gap:10px;min-height:72px;padding:12px;border:1px solid #cbd2cc;background:#fff;color:#315048;text-align:left;cursor:pointer;font:inherit;transition:border-color .15s,background-color .15s,box-shadow .15s}.mode-option:hover{border-color:#b45c36}.mode-option.selected{border-color:#b45c36;background:#fff8f3;box-shadow:0 0 0 2px rgba(180,92,54,.12)}.mode-option>.anticon{margin-top:2px;color:#b45c36;font-size:18px}.mode-option span{display:flex;min-width:0;flex-direction:column;gap:4px}.mode-option strong{font-size:13px}.mode-option small{color:#708079;font-size:11px;line-height:1.45}.mode-check{position:absolute;right:9px;top:9px;color:#b45c36;font-size:14px}
 .source-grid{display:grid;grid-template-columns:1fr 1fr;gap:18px 14px;margin-top:24px}.source-grid label,.jd-field{display:flex;flex-direction:column;gap:7px}.source-grid label>span,.jd-field>span{font-size:12px;color:#5c6e67}.source-grid :deep(.ant-select){width:100%}.jd-field{margin-top:18px}.jd-field b{color:#b45c36;font-weight:600}
 .process-strip{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin:24px 0}.process-strip span{padding:12px 8px;border-top:1px solid #b9c4be;color:#52675f;font-size:11px}.process-strip b{display:block;margin-bottom:5px;color:#b45c36}
 .enter-button{margin-top:auto;display:inline-flex;align-items:center;justify-content:center;gap:8px;height:44px;padding:0 24px;border:1px solid transparent;border-radius:9999px;background:var(--primary);color:var(--primary-foreground);font-size:14px;font-weight:600;font-family:inherit;cursor:pointer;transition:background-color .15s ease,box-shadow .15s ease,transform .15s ease}.enter-button:hover{background:var(--brand-600);box-shadow:var(--shadow-md);transform:translateY(-1px)}.enter-button:disabled{opacity:.6;cursor:not-allowed;transform:none;box-shadow:none}
 @media(max-width:1300px){.scene-library{grid-template-columns:repeat(3,1fr)}.classroom-panel{grid-template-columns:minmax(0,1fr) 340px}.scenario-preview{min-height:500px}}
-@media(max-width:760px){.scene-page{padding:22px 14px 36px}.scene-library{grid-template-columns:1fr 1fr}.scene-card{min-height:132px;padding:14px}.scene-status{display:none}.classroom-panel{grid-template-columns:1fr}.scenario-preview{min-height:360px}.preview-copy{left:24px;right:24px;bottom:72px}.room-caption{left:24px}.config-panel{padding:24px}.field-grid,.source-grid{grid-template-columns:1fr}h1{font-size:36px}}
+@media(max-width:760px){.scene-page{padding:22px 14px 36px}.scene-library{grid-template-columns:1fr 1fr}.scene-card{min-height:132px;padding:14px}.scene-status{display:none}.classroom-panel{grid-template-columns:1fr}.scenario-preview{min-height:360px}.preview-copy{left:24px;right:24px;bottom:72px}.room-caption{left:24px}.config-panel{padding:24px}.field-grid,.source-grid,.mode-options{grid-template-columns:1fr}h1{font-size:36px}}
 </style>

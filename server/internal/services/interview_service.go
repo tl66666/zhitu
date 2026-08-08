@@ -7,6 +7,7 @@ import (
 	"github.com/zhitu/server/internal/models"
 	"gorm.io/gorm"
 	"strings"
+	"time"
 )
 
 // 面试相关错误
@@ -14,6 +15,8 @@ var (
 	ErrInterviewNotFound  = errors.New("interview not found")
 	ErrInterviewEnded     = errors.New("interview already ended")
 	ErrInterviewPreparing = errors.New("interview is still preparing")
+	ErrInterviewStarting  = errors.New("interview is already starting")
+	ErrReportGenerating   = errors.New("interview report is being generated")
 	ErrResumeRequired     = errors.New("resume is required before starting the interview")
 	ErrTargetJDRequired   = errors.New("target_jd is required")
 	ErrResumeLocked       = errors.New("resume is locked for this interview")
@@ -51,10 +54,13 @@ var validInterviewScenes = map[string]struct{}{
 
 // 面试状态枚举
 const (
-	StatusOngoing   = "ongoing"
-	StatusPreparing = "preparing"
-	StatusCompleted = "completed"
-	StatusCancelled = "cancelled"
+	StatusOngoing      = "ongoing"
+	StatusPreparing    = "preparing"
+	StatusStarting     = "starting"
+	StatusReviewing    = "reviewing"
+	StatusCompleted    = "completed"
+	StatusReportFailed = "report_failed"
+	StatusCancelled    = "cancelled"
 )
 
 // 面试模式枚举
@@ -204,6 +210,36 @@ func (s *InterviewService) SetMode(userID, interviewID uint, mode string) (*mode
 		return nil, err
 	}
 	interview.Mode = mode
+	return interview, nil
+}
+
+// Cancel cancels a session that has not entered the formal interview.
+func (s *InterviewService) Cancel(userID, interviewID uint) (*models.Interview, error) {
+	interview, err := s.Get(userID, interviewID)
+	if err != nil {
+		return nil, err
+	}
+	if interview.Status == StatusCancelled {
+		return interview, nil
+	}
+	if interview.Status != StatusPreparing {
+		return nil, ErrInterviewEnded
+	}
+	now := time.Now()
+	result := s.db.Model(&models.Interview{}).
+		Where("id = ? AND user_id = ? AND status = ?", interviewID, userID, StatusPreparing).
+		Updates(map[string]interface{}{
+			"status": StatusCancelled, "status_message": "", "ended_at": now,
+		})
+	if result.Error != nil {
+		return nil, result.Error
+	}
+	if result.RowsAffected == 0 {
+		return nil, ErrInterviewEnded
+	}
+	interview.Status = StatusCancelled
+	interview.StatusMessage = ""
+	interview.EndedAt = &now
 	return interview, nil
 }
 

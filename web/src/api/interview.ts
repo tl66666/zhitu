@@ -117,6 +117,13 @@ export const endInterview = (interviewId: number) => {
   )
 }
 
+// 取消尚未开始的面试
+export const cancelInterview = (interviewId: number) => {
+  return post<ApiResponse<Interview>>(
+    `/api/v1/interviews/${interviewId}/cancel`
+  )
+}
+
 // 获取复盘报告
 export const getReport = (interviewId: number) => {
   return get<ApiResponse<InterviewReport>>(

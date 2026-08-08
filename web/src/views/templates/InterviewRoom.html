@@ -31,11 +31,11 @@
         </div>
         <div class="header-right">
           <a-radio-group
-            v-if="interviewStore.currentInterview && interviewStore.currentInterview.status !== 'completed'"
-            v-model:value="selectedMode"
+            v-if="isOngoing || isPreparing"
+            :value="selectedMode"
             size="small"
             button-style="solid"
-            :disabled="interviewStore.sending || isRecording || recordingFinalizing || isPreparing"
+            :disabled="modeSwitching || interviewStore.sending || isRecording || recordingFinalizing || isStarting"
             @change="handleModeChange"
           >
             <a-radio-button value="text">文字</a-radio-button>
@@ -45,6 +45,7 @@
           <a-button
             v-if="interviewStore.currentInterview?.status === 'ongoing'"
             danger
+            :loading="interviewStore.ending"
             @click="handleEndInterview"
           >
             <PoweroffOutlined /> 结束面试
@@ -52,7 +53,152 @@
         </div>
       </div>
 
-      <section v-if="isTeachingScene && !isVoiceMode" class="classroom-stage">
+      <section v-if="isOngoing" class="mode-context-bar" :class="`mode-context-${interviewMode}`">
+        <div class="mode-context-copy">
+          <span>当前面试工作台</span>
+          <strong>{{ modeLabel(interviewMode) }}面试</strong>
+          <p>{{ modeDescription }}</p>
+        </div>
+        <div class="mode-context-progress">
+          <span>第 {{ interviewStore.currentInterview?.current_question_no || 1 }} 题</span>
+          <b>/ {{ interviewStore.currentInterview?.total_questions || 0 }}</b>
+        </div>
+      </section>
+
+      <section v-if="isPreparing || isStarting" class="lobby-panel">
+        <div class="lobby-stage">
+          <div
+            class="lobby-backdrop"
+            :style="{ backgroundPosition: sceneAtlasPosition(interviewStore.currentInterview?.scene) }"
+          >
+            <div class="lobby-backdrop-shade"></div>
+          </div>
+
+          <div class="lobby-stage-content">
+            <div class="lobby-stage-head">
+              <span class="lobby-eyebrow"><span class="lobby-live-dot"></span>面试候场</span>
+              <span class="lobby-scene-tag">{{ sceneLabel(interviewStore.currentInterview?.scene || '') }}</span>
+            </div>
+
+            <h1>{{ isStarting ? '面试官正在进入会议' : '准备就绪后再正式开始' }}</h1>
+            <p v-if="isStarting">正在结合目标 JD 与简历生成开场问题，请保持当前页面开启。</p>
+            <p v-else>开始后将进入连续问答，考官会根据你的回答动态追问。</p>
+
+            <a-alert
+              v-if="interviewStore.currentInterview?.status_message"
+              type="warning"
+              show-icon
+              :message="interviewStore.currentInterview.status_message"
+              class="lobby-alert"
+            />
+
+            <div class="readiness-list">
+              <div class="readiness-item">
+                <CheckCircleOutlined class="readiness-icon" />
+                <span class="readiness-label">简历快照</span>
+                <strong class="readiness-value">{{ interviewStore.currentInterview?.resume_name || '已绑定' }}</strong>
+              </div>
+              <div class="readiness-item">
+                <CheckCircleOutlined class="readiness-icon" />
+                <span class="readiness-label">目标岗位</span>
+                <strong class="readiness-value">{{ interviewStore.currentInterview?.target_position }}</strong>
+              </div>
+              <div class="readiness-item">
+                <CheckCircleOutlined class="readiness-icon" />
+                <span class="readiness-label">面试形式</span>
+                <strong class="readiness-value">{{ modeLabel(interviewStore.currentInterview?.mode || 'hybrid') }}</strong>
+              </div>
+              <div class="readiness-item">
+                <CheckCircleOutlined class="readiness-icon" />
+                <span class="readiness-label">面试长度</span>
+                <strong class="readiness-value">{{ interviewStore.currentInterview?.total_questions }} 题</strong>
+              </div>
+            </div>
+
+            <div class="lobby-actions">
+              <button
+                type="button"
+                class="lobby-start-button"
+                :disabled="isStarting"
+                @click="handleStartInterview"
+              >
+                <LoadingOutlined v-if="isStarting" />
+                <PlayCircleOutlined v-else />
+                {{ isStarting ? '正在生成首题' : '开始面试' }}
+              </button>
+              <button
+                type="button"
+                class="lobby-cancel-button"
+                :disabled="isStarting"
+                @click="handleCancelInterview"
+              >
+                <CloseCircleOutlined /> 取消本次面试
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <aside class="lobby-brief">
+          <div class="brief-header">
+            <span class="brief-number">{{ sceneNumber(interviewStore.currentInterview?.scene) }}</span>
+            <div class="brief-header-text">
+              <span class="brief-eyebrow">本场面试</span>
+              <h2>{{ sceneLabel(interviewStore.currentInterview?.scene || '') }}</h2>
+            </div>
+          </div>
+
+          <dl class="brief-grid">
+            <div>
+              <dt>目标公司</dt>
+              <dd>{{ interviewStore.currentInterview?.target_company || '未指定' }}</dd>
+            </div>
+            <div>
+              <dt>目标岗位</dt>
+              <dd>{{ interviewStore.currentInterview?.target_position }}</dd>
+            </div>
+            <div>
+              <dt>面试难度</dt>
+              <dd>{{ difficultyLabel(interviewStore.currentInterview?.difficulty || '') }}</dd>
+            </div>
+            <div>
+              <dt>考官风格</dt>
+              <dd>{{ interviewStore.currentInterview?.examiner_style || '标准规范' }}</dd>
+            </div>
+          </dl>
+
+          <div class="brief-jd">
+            <span>目标 JD</span>
+            <p>{{ interviewStore.currentInterview?.target_jd || '未填写' }}</p>
+          </div>
+
+          <div
+            v-if="interviewStore.currentInterview?.training_focus"
+            class="brief-focus"
+          >
+            <span>训练重点</span>
+            <p>{{ interviewStore.currentInterview.training_focus }}</p>
+          </div>
+        </aside>
+      </section>
+
+      <section v-else-if="isReviewing || isReportFailed" class="lifecycle-panel">
+        <a-spin :spinning="isReviewing" size="large" />
+        <ReloadOutlined v-if="isReportFailed" class="lifecycle-icon error" />
+        <h1>{{ isReportFailed ? '复盘生成未完成' : '正在生成面试复盘' }}</h1>
+        <p>{{ isReportFailed ? (interviewStore.currentInterview?.status_message || '可以直接重试，不会丢失面试记录。') : '正在整理逐题反馈、能力评分与改进建议。' }}</p>
+        <a-button v-if="isReportFailed" type="primary" :loading="interviewStore.ending" @click="handleRetryReport">
+          <ReloadOutlined /> 重新生成复盘
+        </a-button>
+      </section>
+
+      <section v-else-if="isCancelled" class="lifecycle-panel">
+        <CloseCircleOutlined class="lifecycle-icon" />
+        <h1>本次面试已取消</h1>
+        <p>该场面试没有正式开始，也不会生成复盘报告。</p>
+        <a-button type="primary" @click="backToList">返回面试列表</a-button>
+      </section>
+
+      <section v-if="isOngoing && isTeachingScene && !isVoiceMode" class="classroom-stage">
         <div class="stage-meta">
           <span>模拟教室</span>
           <strong>{{ currentTeachingPhase }}</strong>
@@ -79,7 +225,11 @@
         </div>
       </section>
 
-      <section v-if="isVoiceMode" class="voice-call-stage">
+      <section
+        v-if="isOngoing && isVoiceMode"
+        class="voice-call-stage"
+        :style="{ backgroundPosition: sceneAtlasPosition(interviewStore.currentInterview?.scene) }"
+      >
         <div class="voice-call-header">
           <span class="voice-live-dot"></span>
           <span>AI 面试官语音通话</span>
@@ -96,14 +246,14 @@
           <AudioOutlined />
           <span v-if="voicePreparing">正在连接麦克风</span>
           <span v-else-if="recordingFinalizing">正在处理回答</span>
-          <span v-else-if="isRecording">松开结束 {{ recordingTimeLabel }}</span>
-          <span v-else>按住说话</span>
+          <span v-else-if="isRecording">结束并发送 {{ recordingTimeLabel }}</span>
+          <span v-else>开始语音回答</span>
         </button>
         <small class="voice-call-hint">回答会在录音结束后自动发送，无需确认或转文字</small>
       </section>
 
       <!-- 主体：左消息流 + 右信息/复盘 -->
-      <a-row :gutter="16" class="room-body">
+      <a-row v-if="isOngoing || isCompleted" :gutter="16" class="room-body">
         <!-- 左侧消息流 -->
         <a-col v-if="!isVoiceMode" :span="16">
           <a-card class="chat-card" :bordered="false" :body-style="{ padding: '0' }">
@@ -182,15 +332,25 @@
                 v-if="showTextInput"
                 v-model:value="inputText"
                 :rows="3"
-                :placeholder="audioDraft ? '录音已作为音频文件加入，可转成文字后编辑' : '输入你的回答...'"
-                :disabled="interviewStore.sending || isRecording || voicePreparing || recordingFinalizing || !!audioDraft"
+                placeholder="输入你的回答..."
+                :disabled="interviewStore.sending || isRecording || voicePreparing || recordingFinalizing"
                 @keydown.enter.exact="handleAnswerKeydown"
               />
               <div class="input-toolbar">
                 <div class="toolbar-left">
-                  <!-- 麦克风录音（mode 为 voice/hybrid 时可用） -->
+                  <a-radio-group
+                    v-if="isHybridMode"
+                    v-model:value="hybridInputMode"
+                    size="small"
+                    button-style="solid"
+                    :disabled="interviewStore.sending || isRecording || voicePreparing || recordingFinalizing"
+                  >
+                    <a-radio-button value="voice"><AudioOutlined /> 语音作答</a-radio-button>
+                    <a-radio-button value="text"><MessageOutlined /> 文字作答</a-radio-button>
+                  </a-radio-group>
+                  <!-- 语音模式在松开录音后直接发送 -->
                   <a-button
-                    v-if="canSendVoice"
+                    v-if="canSendVoice && (!isHybridMode || hybridInputMode === 'voice')"
                     :danger="isRecording"
                     :loading="voicePreparing || recordingFinalizing"
                     :disabled="interviewStore.sending || voicePreparing || recordingFinalizing"
@@ -200,11 +360,8 @@
                     <AudioOutlined />
                     <span v-if="voicePreparing">正在获取麦克风</span>
                     <span v-else-if="recordingFinalizing">正在处理回答</span>
-                    <span v-else-if="isRecording">结束录音 {{ recordingTimeLabel }}</span>
-                    <span v-else>语音回答</span>
-                  </a-button>
-                  <a-button v-if="isHybridMode" type="text" @click="hybridTextInput = !hybridTextInput">
-                    {{ hybridTextInput ? '切换语音输入' : '切换键盘输入' }}
+                    <span v-else-if="isRecording">结束并发送 {{ recordingTimeLabel }}</span>
+                    <span v-else>语音回答（自动发送）</span>
                   </a-button>
                   <span v-if="showTextInput" class="input-hint">Enter 发送 · Shift+Enter 换行</span>
                 </div>
@@ -223,7 +380,7 @@
             </div>
             <div v-else class="chat-input-disabled">
               <a-alert
-                :message="`面试已${interviewStore.currentInterview?.status === 'completed' ? '完成' : '取消'}，请在右侧查看复盘报告`"
+                message="面试已完成，请在右侧查看复盘报告"
                 type="info"
                 show-icon
               />
@@ -251,7 +408,7 @@
                     <a-descriptions-item label="难度">
                       {{ difficultyLabel(interviewStore.currentInterview.difficulty) }}
                     </a-descriptions-item>
-                    <a-descriptions-item label="模式">
+                    <a-descriptions-item label="面试形式">
                       {{ modeLabel(interviewStore.currentInterview.mode) }}
                     </a-descriptions-item>
                     <a-descriptions-item label="进度">

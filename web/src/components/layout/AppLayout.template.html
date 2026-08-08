@@ -112,7 +112,7 @@
       </a-layout-header>
 
       <!-- 内容区域 -->
-      <a-layout-content class="app-content" :class="{ 'editor-content': currentRouteName === 'ResumeEditor', 'kanban-content': currentRouteName === 'DeliveryKanban' }">
+      <a-layout-content class="app-content" :class="{ 'editor-content': currentRouteName === 'ResumeEditor', 'kanban-content': currentRouteName === 'DeliveryKanban', 'copilot-content': currentRouteName === 'Copilot' }">
         <router-view v-slot="{ Component }">
           <transition name="fade" mode="out-in">
             <component :is="Component" />

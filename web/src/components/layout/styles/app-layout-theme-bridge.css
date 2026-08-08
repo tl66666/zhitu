@@ -222,7 +222,8 @@
   }
 }
 
-.app-content.editor-content {
+.app-content.editor-content,
+.app-content.copilot-content {
   height: calc(100vh - 64px);
   min-height: 0;
   margin: 0;

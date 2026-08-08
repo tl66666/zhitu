@@ -21,6 +21,8 @@ export const useInterviewStore = defineStore('interview', () => {
   const scores = ref<InterviewScore[]>([])
   const loading = ref(false)
   const sending = ref(false)
+  const starting = ref(false)
+  const ending = ref(false)
   const streamingText = ref('')
 
   // 获取面试列表（无分页）
@@ -73,9 +75,13 @@ export const useInterviewStore = defineStore('interview', () => {
 
   // 启动准备中的面试并接收基于简历/JD 的首题
   const startInterview = async (id: number, onDelta?: (delta: string) => void) => {
-    sending.value = true
+    starting.value = true
     streamingText.value = ''
     let started = false
+    if (currentInterview.value?.id === id) {
+      currentInterview.value.status = 'starting'
+      currentInterview.value.status_message = ''
+    }
     try {
       await interviewApi.startInterview(id, {
         onDelta: (delta) => {
@@ -88,14 +94,15 @@ export const useInterviewStore = defineStore('interview', () => {
           if (data.interview) currentInterview.value = data.interview
           if (data.message) messages.value = [data.message]
         },
-        onError: (errMsg) => message.error(errMsg || '面试准备失败'),
+        onError: (errMsg) => message.error(errMsg || '面试启动失败，请重试'),
       })
+      if (!started) await fetchOne(id)
       return started
     } catch (error) {
       console.error('启动面试失败:', error)
       return false
     } finally {
-      sending.value = false
+      starting.value = false
       streamingText.value = ''
     }
   }
@@ -154,6 +161,7 @@ export const useInterviewStore = defineStore('interview', () => {
     }
     messages.value.push(userMsg)
 
+    let succeeded = false
     try {
       await interviewApi.sendMessage(
         id,
@@ -164,13 +172,18 @@ export const useInterviewStore = defineStore('interview', () => {
             onDelta?.(delta)
           },
           onDone: (data) => {
+            succeeded = true
             // 流结束，清空临时流文本，把 AI 消息加入列表
             streamingText.value = ''
             if (data.message) {
               messages.value.push(data.message)
+              if (currentInterview.value) {
+                currentInterview.value.current_question_no = data.message.question_no
+              }
             }
           },
           onInterviewEnded: (data) => {
+            succeeded = true
             if (data.message) {
               messages.value.push(data.message)
             }
@@ -185,9 +198,17 @@ export const useInterviewStore = defineStore('interview', () => {
         },
         signal
       )
-      return true
+      if (!succeeded) {
+        const optimisticIndex = messages.value.findIndex((item) => item.id === userMsg.id)
+        if (optimisticIndex >= 0) messages.value.splice(optimisticIndex, 1)
+        await fetchOne(id)
+      }
+      return succeeded
     } catch (error) {
       console.error('发送消息失败:', error)
+      const optimisticIndex = messages.value.findIndex((item) => item.id === userMsg.id)
+      if (optimisticIndex >= 0) messages.value.splice(optimisticIndex, 1)
+      await fetchOne(id)
       return false
     } finally {
       sending.value = false
@@ -270,6 +291,9 @@ export const useInterviewStore = defineStore('interview', () => {
       return succeeded
     } catch (error) {
       console.error('发送语音失败:', error)
+      const placeholderIndex = messages.value.findIndex((item) => item.id === userMsg.id)
+      if (placeholderIndex >= 0) messages.value.splice(placeholderIndex, 1)
+      await fetchOne(id)
       return false
     } finally {
       sending.value = false
@@ -291,6 +315,11 @@ export const useInterviewStore = defineStore('interview', () => {
 
   // 结束面试并生成复盘
   const endInterview = async (id: number) => {
+    ending.value = true
+    if (currentInterview.value?.id === id) {
+      currentInterview.value.status = 'reviewing'
+      currentInterview.value.status_message = ''
+    }
     try {
       const response = await interviewApi.endInterview(id)
       const r = response.data.data
@@ -303,6 +332,25 @@ export const useInterviewStore = defineStore('interview', () => {
       return r || null
     } catch (error) {
       console.error('结束面试失败:', error)
+      await fetchOne(id)
+      return null
+    } finally {
+      ending.value = false
+    }
+  }
+
+  const cancelInterview = async (id: number) => {
+    try {
+      const response = await interviewApi.cancelInterview(id)
+      const cancelled = response.data.data
+      if (cancelled && currentInterview.value?.id === id) currentInterview.value = cancelled
+      const listItem = interviews.value.find((item) => item.id === id)
+      if (cancelled && listItem) Object.assign(listItem, cancelled)
+      message.success('本次面试已取消')
+      return cancelled || null
+    } catch (error) {
+      console.error('取消面试失败:', error)
+      await fetchOne(id)
       return null
     }
   }
@@ -349,6 +397,8 @@ export const useInterviewStore = defineStore('interview', () => {
     scores,
     loading,
     sending,
+    starting,
+    ending,
     streamingText,
     // 操作
     fetchList,
@@ -361,6 +411,7 @@ export const useInterviewStore = defineStore('interview', () => {
     sendVoice,
     playTts,
     endInterview,
+    cancelInterview,
     fetchReport,
     fetchScores,
     clearCurrent,

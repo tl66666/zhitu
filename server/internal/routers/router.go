@@ -156,6 +156,7 @@ func New(deps Deps) *gin.Engine {
 			interviews.POST("/:id/voice", deps.InterviewHandler.SendVoice)
 			interviews.GET("/:id/tts/:msgId", deps.InterviewHandler.GetTTS)
 			interviews.POST("/:id/end", deps.InterviewHandler.End)
+			interviews.POST("/:id/cancel", deps.InterviewHandler.Cancel)
 			interviews.GET("/:id/report", deps.InterviewHandler.GetReport)
 			interviews.GET("/:id/scores", deps.InterviewHandler.GetScores)
 		}

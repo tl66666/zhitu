@@ -412,6 +412,9 @@ export type InterviewMode = 'text' | 'voice' | 'hybrid'
 // 面试状态
 export type InterviewStatus = 'ongoing' | 'completed' | 'cancelled'
   | 'preparing'
+  | 'starting'
+  | 'reviewing'
+  | 'report_failed'
 
 // 面试难度
 export type InterviewDifficulty = 'junior' | 'mid' | 'senior' | 'mixed'
@@ -437,6 +440,7 @@ export interface Interview {
   total_questions: number
   mode: InterviewMode
   status: InterviewStatus
+  status_message: string
   current_question_no: number
   started_at: string | null
   ended_at: string | null

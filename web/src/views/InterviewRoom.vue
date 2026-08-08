@@ -11,14 +11,15 @@ import {
   SoundOutlined,
   AudioOutlined,
   SendOutlined,
-  FileTextOutlined,
   CheckCircleOutlined,
   WarningOutlined,
   BulbOutlined,
   ClockCircleOutlined,
+  CloseCircleOutlined,
+  PlayCircleOutlined,
+  ReloadOutlined,
 } from '@ant-design/icons-vue'
 import { useInterviewStore } from '@/stores/interview'
-import { transcribeVoice } from '@/api/interview'
 import { listResumes, listVersions } from '@/api/resume'
 import type {
   InterviewScene,
@@ -65,19 +66,15 @@ const interviewId = computed(() => Number(route.params.id))
 const inputText = ref('')
 const messagesContainer = ref<HTMLElement | null>(null)
 const sideTab = ref<'info' | 'report' | 'scores'>('info')
+const selectedMode = ref<InterviewMode>('text')
+const hybridInputMode = ref<'voice' | 'text'>('voice')
+const modeSwitching = ref(false)
 
 // 麦克风录音状态
 const isRecording = ref(false)
 const voicePreparing = ref(false)
 const recordingFinalizing = ref(false)
 const recordingSeconds = ref(0)
-const transcribingDraft = ref(false)
-type AudioDraft = {
-  file: File
-  objectUrl: string
-  durationSeconds: number
-}
-const audioDraft = ref<AudioDraft | null>(null)
 const recordingTimeLabel = computed(() => {
   const minutes = Math.floor(recordingSeconds.value / 60)
   const seconds = recordingSeconds.value % 60
@@ -123,6 +120,42 @@ const isOngoing = computed(
 const isCompleted = computed(
   () => interviewStore.currentInterview?.status === 'completed'
 )
+const isPreparing = computed(
+  () => interviewStore.currentInterview?.status === 'preparing'
+)
+const isStarting = computed(
+  () => interviewStore.currentInterview?.status === 'starting' || interviewStore.starting
+)
+const isReviewing = computed(
+  () => interviewStore.currentInterview?.status === 'reviewing' || interviewStore.ending
+)
+const isReportFailed = computed(
+  () => interviewStore.currentInterview?.status === 'report_failed'
+)
+const isCancelled = computed(
+  () => interviewStore.currentInterview?.status === 'cancelled'
+)
+const interviewMode = computed<InterviewMode>(
+  () => interviewStore.currentInterview?.mode || 'text'
+)
+const isTextMode = computed(() => interviewMode.value === 'text')
+const isVoiceMode = computed(() => interviewMode.value === 'voice')
+const isHybridMode = computed(() => interviewMode.value === 'hybrid')
+const showTextInput = computed(
+  () => isTextMode.value || (isHybridMode.value && hybridInputMode.value === 'text')
+)
+const modeDescription = computed(() => {
+  if (isVoiceMode.value) return '像线上语音面试一样作答，松开按钮后会立即发送并进入下一轮。'
+  if (isHybridMode.value) return '每道题可选择语音或文字作答，语音结束后会直接提交。'
+  return '保持文字对话节奏，输入回答后发送，适合需要斟酌表达的题目。'
+})
+const voiceStatusText = computed(() => {
+  if (voicePreparing.value) return '正在连接麦克风'
+  if (recordingFinalizing.value || interviewStore.sending) return '回答发送中'
+  if (isRecording.value) return `正在录音 ${recordingTimeLabel.value}`
+  if (playingMessageId.value !== null) return '考官正在朗读'
+  return '等待你的回答'
+})
 const canSendVoice = computed(() => {
   const mode = interviewStore.currentInterview?.mode
   return mode === 'voice' || mode === 'hybrid'
@@ -144,6 +177,37 @@ const currentTeachingPhase = computed(() => {
   return '考官答辩'
 })
 const teachingTimeHint = computed(() => currentTeachingPhase.value === '模拟试讲' ? '8 分钟' : '2 分钟')
+
+watch(
+  () => interviewStore.currentInterview?.mode,
+  (mode) => {
+    if (mode === 'text' || mode === 'voice' || mode === 'hybrid') selectedMode.value = mode
+  },
+  { immediate: true }
+)
+
+const handleModeChange = async (event: { target?: { value?: InterviewMode } } | InterviewMode) => {
+  const nextMode = typeof event === 'string' ? event : event.target?.value
+  if (!nextMode || nextMode === interviewMode.value || modeSwitching.value) return
+  if (!isOngoing.value && !isPreparing.value) return
+  if (isRecording.value || recordingFinalizing.value || interviewStore.sending) {
+    selectedMode.value = interviewMode.value
+    message.warning('请先完成当前回答，再切换面试形式')
+    return
+  }
+  modeSwitching.value = true
+  try {
+    const updated = await interviewStore.setMode(interviewId.value, nextMode)
+    if (!updated) {
+      selectedMode.value = interviewMode.value
+      message.error('面试形式切换失败，请稍后重试')
+      return
+    }
+    hybridInputMode.value = nextMode === 'text' ? 'text' : 'voice'
+  } finally {
+    modeSwitching.value = false
+  }
+}
 
 // 显示的消息列表（隐藏流式时的临时占位）
 const displayMessages = computed(() => interviewStore.messages)
@@ -214,6 +278,41 @@ const sceneColor = (s: InterviewScene | string): string => {
   }
   return map[s] || 'default'
 }
+// 场景在 atlas 雪碧图中的位置（与 InterviewSceneSelect 保持一致）
+const sceneAtlasPosition = (s: InterviewScene | string | undefined): string => {
+  const map: Record<string, string> = {
+    teaching: '0% 0%',
+    corporate: '33.333% 0%',
+    group: '66.666% 0%',
+    defense: '100% 0%',
+    client: '0% 50%',
+    pressure: '33.333% 50%',
+    public: '66.666% 50%',
+    medical: '100% 50%',
+    media: '0% 100%',
+    remote: '33.333% 100%',
+    system: '66.666% 100%',
+    aviation: '100% 100%',
+  }
+  return map[s || ''] || '0% 0%'
+}
+const sceneNumber = (s: InterviewScene | string | undefined): string => {
+  const map: Record<string, string> = {
+    teaching: '01',
+    corporate: '02',
+    group: '03',
+    defense: '04',
+    client: '05',
+    pressure: '06',
+    public: '07',
+    medical: '08',
+    media: '09',
+    remote: '10',
+    system: '11',
+    aviation: '12',
+  }
+  return map[s || ''] || '00'
+}
 
 // 难度
 const difficultyLabel = (d: InterviewDifficulty | string): string => {
@@ -247,16 +346,24 @@ const modeColor = (m: InterviewMode | string): string => {
 // 状态
 const statusLabel = (s: InterviewStatus | string): string => {
   const map: Record<string, string> = {
+    preparing: '待开始',
+    starting: '正在开场',
     ongoing: '进行中',
+    reviewing: '生成复盘中',
     completed: '已完成',
+    report_failed: '复盘失败',
     cancelled: '已取消',
   }
   return map[s] || s
 }
 const statusBadge = (s: InterviewStatus | string): 'success' | 'processing' | 'default' | 'error' => {
   const map: Record<string, 'success' | 'processing' | 'default' | 'error'> = {
+    preparing: 'default',
+    starting: 'processing',
     ongoing: 'processing',
+    reviewing: 'processing',
     completed: 'success',
+    report_failed: 'error',
     cancelled: 'default',
   }
   return map[s] || 'default'
@@ -369,6 +476,33 @@ const backToList = () => {
   router.push('/app/interviews')
 }
 
+const handleStartInterview = async () => {
+  if (!isPreparing.value || interviewStore.starting) return
+  await interviewStore.startInterview(interviewId.value)
+  scrollToBottom()
+}
+
+const handleCancelInterview = () => {
+  Modal.confirm({
+    title: '取消本次面试？',
+    content: '候场配置将保留在历史记录中，但本次面试不能再开始。',
+    okText: '确认取消',
+    okType: 'danger',
+    cancelText: '继续准备',
+    onOk: async () => {
+      const cancelled = await interviewStore.cancelInterview(interviewId.value)
+      if (cancelled) await router.push('/app/interviews')
+    },
+  })
+}
+
+const handleRetryReport = async () => {
+  const report = await interviewStore.endInterview(interviewId.value)
+  if (!report) return
+  sideTab.value = 'report'
+  await interviewStore.fetchScores(interviewId.value)
+}
+
 // ============ 发送简历相关 ============
 
 // 前往简历实验室（无简历时）
@@ -462,17 +596,10 @@ const confirmAttachResume = async () => {
   }
 }
 
-// 发送文字回答或音频草稿
+// 发送文字回答
 const handleSendAnswer = async () => {
   if (!isOngoing.value) {
     message.warning('面试已结束，无法继续作答')
-    return
-  }
-
-  if (audioDraft.value) {
-    const draft = audioDraft.value
-    const sent = await interviewStore.sendVoice(interviewId.value, draft.file)
-    if (sent) clearAudioDraft()
     return
   }
 
@@ -508,13 +635,6 @@ const stopRecordingTimer = () => {
 const releaseMicrophone = () => {
   microphoneStream?.getTracks().forEach((track) => track.stop())
   microphoneStream = null
-}
-
-const clearAudioDraft = () => {
-  if (audioDraft.value) {
-    URL.revokeObjectURL(audioDraft.value.objectUrl)
-    audioDraft.value = null
-  }
 }
 
 const teardownAudioGraph = async () => {
@@ -636,14 +756,17 @@ const finalizeVoiceRecording = async () => {
     `voice-answer-${Date.now()}.wav`,
     { type: 'audio/wav' }
   )
-  clearAudioDraft()
-  audioDraft.value = {
-    file,
-    objectUrl: URL.createObjectURL(file),
-    durationSeconds: normalizedPCM.length / targetSampleRate,
+  try {
+    // 线上面试的语音回答在松开录音后直接提交，不再生成待确认草稿。
+    await interviewStore.sendVoice(
+      interviewId.value,
+      file,
+      normalizedPCM.length / targetSampleRate
+    )
+  } finally {
+    recordingSeconds.value = 0
+    recordingFinalizing.value = false
   }
-  recordingSeconds.value = 0
-  recordingFinalizing.value = false
 }
 
 const startVoiceRecording = async () => {
@@ -737,43 +860,6 @@ const discardVoiceRecording = () => {
   isRecording.value = false
 }
 
-const formatDuration = (seconds: number) => {
-  const rounded = Math.max(0, Math.round(seconds))
-  const minutes = Math.floor(rounded / 60)
-  return `${String(minutes).padStart(2, '0')}:${String(rounded % 60).padStart(2, '0')}`
-}
-
-const formatFileSize = (size: number) => {
-  if (size < 1024 * 1024) return `${Math.max(1, Math.round(size / 1024))} KB`
-  return `${(size / 1024 / 1024).toFixed(1)} MB`
-}
-
-const handleTranscribeDraft = async () => {
-  const draft = audioDraft.value
-  if (!draft || transcribingDraft.value) return
-  transcribingDraft.value = true
-  try {
-    const response = await transcribeVoice(interviewId.value, draft.file)
-    const text = response.data.data?.text?.trim()
-    if (!text) {
-      message.error('未识别到有效文字，请重新录制')
-      return
-    }
-    clearAudioDraft()
-    inputText.value = text
-    message.success('已转化为文本，可编辑后发送')
-  } catch (error) {
-    console.error('语音转文字失败:', error)
-  } finally {
-    transcribingDraft.value = false
-  }
-}
-
-const rerecordVoice = async () => {
-  clearAudioDraft()
-  await startVoiceRecording()
-}
-
 // TTS 播放（调后端 xiaomi mimo TTS）
 const stopTtsPlayback = () => {
   const player = audioPlayer.value
@@ -837,7 +923,6 @@ const handlePlayTts = async (msg: InterviewMessage, automatic = false) => {
 
 onBeforeUnmount(() => {
   discardVoiceRecording()
-  clearAudioDraft()
   stopTtsPlayback()
 })
 

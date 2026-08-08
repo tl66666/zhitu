@@ -59,7 +59,7 @@ func (h *InterviewHandler) Start(c *gin.Context) {
 		flusher.Flush()
 	})
 	if err != nil {
-		errData, _ := json.Marshal(map[string]string{"type": "error", "message": err.Error()})
+		errData, _ := json.Marshal(map[string]string{"type": "error", "message": interviewErrorMessage(err)})
 		fmt.Fprintf(c.Writer, "data: %s\n\n", errData)
 		flusher.Flush()
 		return
@@ -71,6 +71,21 @@ func (h *InterviewHandler) Start(c *gin.Context) {
 	})
 	fmt.Fprintf(c.Writer, "data: %s\n\n", startedData)
 	flusher.Flush()
+}
+
+func interviewErrorMessage(err error) string {
+	switch err {
+	case services.ErrInterviewPreparing:
+		return "面试仍在候场，请点击开始面试"
+	case services.ErrInterviewStarting:
+		return "面试正在开场，请稍候"
+	case services.ErrReportGenerating:
+		return "复盘正在生成，请稍候"
+	case services.ErrInterviewEnded:
+		return "本次面试已结束"
+	default:
+		return err.Error()
+	}
 }
 
 // SetMode PATCH /api/v1/interviews/:id/mode 切换进行中的交互模式
@@ -99,6 +114,29 @@ func (h *InterviewHandler) SetMode(c *gin.Context) {
 		return
 	}
 	utils.OK(c, interview)
+}
+
+// Cancel POST /api/v1/interviews/:id/cancel cancels a session still in the lobby.
+func (h *InterviewHandler) Cancel(c *gin.Context) {
+	userID := c.GetUint(middleware.ContextUserID)
+	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
+	if err != nil || id == 0 {
+		utils.BadRequest(c, "invalid interview id")
+		return
+	}
+	interview, err := h.svc.Cancel(userID, uint(id))
+	if err != nil {
+		switch err {
+		case services.ErrInterviewNotFound:
+			utils.NotFound(c, err.Error())
+		case services.ErrInterviewEnded:
+			utils.Conflict(c, "only an interview waiting to start can be cancelled")
+		default:
+			utils.InternalError(c, err.Error())
+		}
+		return
+	}
+	utils.OKWithMsg(c, "interview cancelled", interview)
 }
 
 func (h *InterviewHandler) setSSEHeaders(c *gin.Context) {
@@ -209,12 +247,12 @@ func (h *InterviewHandler) SendMessage(c *gin.Context) {
 	})
 	if err != nil {
 		if err == services.ErrInterviewPreparing || err == services.ErrResumeRequired || err == services.ErrModeNotAllowed {
-			errData, _ := json.Marshal(map[string]string{"type": "error", "message": err.Error()})
+			errData, _ := json.Marshal(map[string]string{"type": "error", "message": interviewErrorMessage(err)})
 			fmt.Fprintf(c.Writer, "data: %s\n\n", errData)
 			flusher.Flush()
 			return
 		}
-		errData, _ := json.Marshal(map[string]string{"type": "error", "message": err.Error()})
+		errData, _ := json.Marshal(map[string]string{"type": "error", "message": interviewErrorMessage(err)})
 		fmt.Fprintf(c.Writer, "data: %s\n\n", errData)
 		flusher.Flush()
 		return
@@ -283,14 +321,21 @@ func (h *InterviewHandler) SendVoice(c *gin.Context) {
 		flusher.Flush()
 	})
 	if err != nil {
-		errData, _ := json.Marshal(map[string]string{"type": "error", "message": err.Error()})
+		errData, _ := json.Marshal(map[string]string{"type": "error", "message": interviewErrorMessage(err)})
 		fmt.Fprintf(c.Writer, "data: %s\n\n", errData)
 		flusher.Flush()
 		return
 	}
 
 	interview, _ := h.svc.Get(userID, uint(interviewID))
-	if aiMsg != nil {
+	if interview != nil && interview.Status == services.StatusCompleted {
+		doneData, _ := json.Marshal(map[string]interface{}{
+			"type":      "interview_ended",
+			"message":   aiMsg,
+			"interview": interview,
+		})
+		fmt.Fprintf(c.Writer, "data: %s\n\n", doneData)
+	} else if aiMsg != nil {
 		doneData, _ := json.Marshal(map[string]interface{}{
 			"type":      "done",
 			"message":   aiMsg,
@@ -374,6 +419,10 @@ func (h *InterviewHandler) End(c *gin.Context) {
 	if err != nil {
 		if err == services.ErrInterviewNotFound {
 			utils.NotFound(c, err.Error())
+			return
+		}
+		if err == services.ErrInterviewPreparing || err == services.ErrInterviewEnded || err == services.ErrReportGenerating {
+			utils.Conflict(c, err.Error())
 			return
 		}
 		utils.InternalError(c, err.Error())

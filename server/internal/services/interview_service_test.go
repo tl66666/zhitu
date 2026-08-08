@@ -85,6 +85,38 @@ func TestCreateSupportsAllSceneHallScenesWithoutLLM(t *testing.T) {
 	}
 }
 
+func TestCancelOnlyAllowsPreparingInterview(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file:cancel_state_test?mode=memory&cache=shared"), &gorm.Config{
+		DisableForeignKeyConstraintWhenMigrating: true,
+	})
+	if err != nil {
+		t.Fatalf("open test database: %v", err)
+	}
+	if err := db.AutoMigrate(&models.Interview{}); err != nil {
+		t.Fatalf("migrate test database: %v", err)
+	}
+	waiting := models.Interview{UserID: 1, Status: StatusPreparing}
+	active := models.Interview{UserID: 1, Status: StatusOngoing}
+	if err := db.Create(&waiting).Error; err != nil {
+		t.Fatalf("create waiting interview: %v", err)
+	}
+	if err := db.Create(&active).Error; err != nil {
+		t.Fatalf("create active interview: %v", err)
+	}
+
+	service := NewInterviewService(db, nil, nil, nil)
+	cancelled, err := service.Cancel(1, waiting.ID)
+	if err != nil || cancelled.Status != StatusCancelled {
+		t.Fatalf("Cancel() = %#v, %v", cancelled, err)
+	}
+	if _, err := service.Cancel(1, active.ID); !errors.Is(err, ErrInterviewEnded) {
+		t.Fatalf("Cancel(active) error = %v, want ErrInterviewEnded", err)
+	}
+	if _, err := service.Cancel(2, waiting.ID); !errors.Is(err, ErrInterviewNotFound) {
+		t.Fatalf("Cancel(other user) error = %v, want ErrInterviewNotFound", err)
+	}
+}
+
 func TestStartGeneratesResumeAndJDGroundedFirstQuestion(t *testing.T) {
 	requests := make(chan map[string]interface{}, 1)
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

@@ -19,6 +19,12 @@ func (s *InterviewService) SendMessage(ctx context.Context, userID, interviewID 
 		if interview.Status == StatusPreparing {
 			return nil, ErrInterviewPreparing
 		}
+		if interview.Status == StatusStarting {
+			return nil, ErrInterviewStarting
+		}
+		if interview.Status == StatusReviewing {
+			return nil, ErrReportGenerating
+		}
 		return nil, ErrInterviewEnded
 	}
 	if strings.TrimSpace(interview.ResumeSnapshot) == "" {
@@ -65,6 +71,27 @@ func (s *InterviewService) Start(ctx context.Context, userID, interviewID uint, 
 		}
 		return interview, nil, ErrInterviewPreparing
 	}
+	if interview.Status == StatusStarting {
+		var first models.InterviewMessage
+		if err := s.db.Where("interview_id = ? AND role = ? AND question_no = ?", interviewID, "assistant", 1).First(&first).Error; err == nil {
+			return s.finishStart(interview, &first)
+		}
+		// A disconnected request can leave a starting session behind. Reclaim it after a short lease.
+		if time.Since(interview.UpdatedAt) < 2*time.Minute {
+			return interview, nil, ErrInterviewStarting
+		}
+		leaseExpiredAt := time.Now().Add(-2 * time.Minute)
+		result := s.db.Model(&models.Interview{}).
+			Where("id = ? AND user_id = ? AND status = ? AND updated_at <= ?", interview.ID, userID, StatusStarting, leaseExpiredAt).
+			Updates(map[string]interface{}{"status": StatusPreparing, "status_message": "上次启动中断，请重新开始"})
+		if result.Error != nil {
+			return interview, nil, result.Error
+		}
+		if result.RowsAffected == 0 {
+			return interview, nil, ErrInterviewStarting
+		}
+		interview.Status = StatusPreparing
+	}
 	if interview.Status != StatusPreparing {
 		return interview, nil, ErrInterviewEnded
 	}
@@ -76,8 +103,25 @@ func (s *InterviewService) Start(ctx context.Context, userID, interviewID uint, 
 	if err := s.db.Where("interview_id = ? AND role = ? AND question_no = ?", interviewID, "assistant", 1).First(&existing).Error; err == nil {
 		return s.finishStart(interview, &existing)
 	}
+	claimed := s.db.Model(&models.Interview{}).
+		Where("id = ? AND user_id = ? AND status = ?", interview.ID, userID, StatusPreparing).
+		Updates(map[string]interface{}{"status": StatusStarting, "status_message": ""})
+	if claimed.Error != nil {
+		return interview, nil, claimed.Error
+	}
+	if claimed.RowsAffected == 0 {
+		return interview, nil, ErrInterviewStarting
+	}
+	interview.Status = StatusStarting
+	interview.StatusMessage = ""
 	first, err := s.askNextQuestionWithStream(ctx, interview, 1, onDelta)
 	if err != nil {
+		statusMessage := "首题生成失败，请重试"
+		_ = s.db.Model(&models.Interview{}).
+			Where("id = ? AND user_id = ? AND status = ?", interview.ID, userID, StatusStarting).
+			Updates(map[string]interface{}{"status": StatusPreparing, "status_message": statusMessage}).Error
+		interview.Status = StatusPreparing
+		interview.StatusMessage = statusMessage
 		return interview, nil, err
 	}
 	return s.finishStart(interview, first)
@@ -86,17 +130,23 @@ func (s *InterviewService) Start(ctx context.Context, userID, interviewID uint, 
 func (s *InterviewService) finishStart(interview *models.Interview, first *models.InterviewMessage) (*models.Interview, *models.InterviewMessage, error) {
 	now := time.Now()
 	result := s.db.Model(&models.Interview{}).
-		Where("id = ? AND user_id = ? AND status = ?", interview.ID, interview.UserID, StatusPreparing).
-		Updates(map[string]interface{}{"status": StatusOngoing, "started_at": now, "current_question_no": 1})
+		Where("id = ? AND user_id = ? AND status IN ?", interview.ID, interview.UserID, []string{StatusPreparing, StatusStarting}).
+		Updates(map[string]interface{}{"status": StatusOngoing, "status_message": "", "started_at": now, "current_question_no": 1})
 	if result.Error != nil {
 		return interview, first, result.Error
 	}
 	if result.RowsAffected > 0 {
 		interview.Status = StatusOngoing
+		interview.StatusMessage = ""
 		interview.StartedAt = &now
 		interview.CurrentQuestionNo = 1
+		return interview, first, nil
 	}
-	return interview, first, nil
+	latest, err := s.Get(interview.UserID, interview.ID)
+	if err == nil && latest.Status == StatusOngoing {
+		return latest, first, nil
+	}
+	return interview, first, ErrInterviewStarting
 }
 
 // End 结束面试并生成复盘报告
@@ -109,8 +159,14 @@ func (s *InterviewService) End(ctx context.Context, userID, id uint) (*models.In
 		// 已结束，直接返回报告
 		return s.GetReport(userID, id)
 	}
-	if interview.Status == StatusPreparing {
+	if interview.Status == StatusPreparing || interview.Status == StatusStarting {
 		return nil, ErrInterviewPreparing
+	}
+	if interview.Status == StatusReviewing {
+		return nil, ErrReportGenerating
+	}
+	if interview.Status != StatusOngoing && interview.Status != StatusReportFailed {
+		return nil, ErrInterviewEnded
 	}
 
 	if err := s.endAndGenerateReport(ctx, interview); err != nil {
@@ -122,13 +178,25 @@ func (s *InterviewService) End(ctx context.Context, userID, id uint) (*models.In
 // endAndGenerateReport 内部结束面试并生成评分与报告
 func (s *InterviewService) endAndGenerateReport(ctx context.Context, interview *models.Interview) error {
 	now := time.Now()
-	interview.Status = StatusCompleted
+	result := s.db.Model(&models.Interview{}).
+		Where("id = ? AND user_id = ? AND status IN ?", interview.ID, interview.UserID, []string{StatusOngoing, StatusReportFailed}).
+		Updates(map[string]interface{}{"status": StatusReviewing, "status_message": "", "ended_at": now})
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return ErrReportGenerating
+	}
+	interview.Status = StatusReviewing
 	interview.EndedAt = &now
-	if err := s.db.Model(interview).Updates(map[string]interface{}{
-		"status":   StatusCompleted,
-		"ended_at": now,
-	}).Error; err != nil {
-		return err
+	interview.StatusMessage = ""
+
+	// Reports are derived data. Clear a failed attempt before regenerating it.
+	if err := s.db.Where("interview_id = ?", interview.ID).Delete(&models.InterviewScore{}).Error; err != nil {
+		return s.failReport(interview, err)
+	}
+	if err := s.db.Where("interview_id = ?", interview.ID).Delete(&models.InterviewReport{}).Error; err != nil {
+		return s.failReport(interview, err)
 	}
 
 	// 生成评分
@@ -139,9 +207,25 @@ func (s *InterviewService) endAndGenerateReport(ctx context.Context, interview *
 
 	// 生成报告
 	if err := s.generateReport(ctx, interview); err != nil {
-		return fmt.Errorf("generate report: %w", err)
+		return s.failReport(interview, fmt.Errorf("generate report: %w", err))
 	}
+	if err := s.db.Model(&models.Interview{}).
+		Where("id = ? AND user_id = ? AND status = ?", interview.ID, interview.UserID, StatusReviewing).
+		Updates(map[string]interface{}{"status": StatusCompleted, "status_message": ""}).Error; err != nil {
+		return err
+	}
+	interview.Status = StatusCompleted
 	return nil
+}
+
+func (s *InterviewService) failReport(interview *models.Interview, cause error) error {
+	statusMessage := "复盘生成失败，请重试"
+	_ = s.db.Model(&models.Interview{}).
+		Where("id = ? AND user_id = ? AND status = ?", interview.ID, interview.UserID, StatusReviewing).
+		Updates(map[string]interface{}{"status": StatusReportFailed, "status_message": statusMessage}).Error
+	interview.Status = StatusReportFailed
+	interview.StatusMessage = statusMessage
+	return cause
 }
 
 // askNextQuestion 生成下一题（非流式，用于初始化第一题）
