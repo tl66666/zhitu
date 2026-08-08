@@ -12,18 +12,19 @@ import (
 
 // 面试相关错误
 var (
-	ErrInterviewNotFound  = errors.New("interview not found")
-	ErrInterviewEnded     = errors.New("interview already ended")
-	ErrInterviewPreparing = errors.New("interview is still preparing")
-	ErrInterviewStarting  = errors.New("interview is already starting")
-	ErrReportGenerating   = errors.New("interview report is being generated")
-	ErrResumeRequired     = errors.New("resume is required before starting the interview")
-	ErrTargetJDRequired   = errors.New("target_jd is required")
-	ErrResumeLocked       = errors.New("resume is locked for this interview")
-	ErrInvalidMode        = errors.New("invalid interview mode")
-	ErrModeNotAllowed     = errors.New("this response mode is not allowed for the interview")
-	ErrMessageNotFound    = errors.New("interview message not found")
-	ErrReportNotReady     = errors.New("report not generated yet, please end the interview first")
+	ErrInterviewNotFound     = errors.New("interview not found")
+	ErrInterviewEnded        = errors.New("interview already ended")
+	ErrInterviewPreparing    = errors.New("interview is still preparing")
+	ErrInterviewStarting     = errors.New("interview is already starting")
+	ErrReportGenerating      = errors.New("interview report is being generated")
+	ErrResumeRequired        = errors.New("resume is required before starting the interview")
+	ErrTargetJDRequired      = errors.New("target_jd is required")
+	ErrResumeLocked          = errors.New("resume is locked for this interview")
+	ErrInvalidMode           = errors.New("invalid interview mode")
+	ErrModeNotAllowed        = errors.New("this response mode is not allowed for the interview")
+	ErrMessageNotFound       = errors.New("interview message not found")
+	ErrReportNotReady        = errors.New("report not generated yet, please end the interview first")
+	ErrInterviewNotDeletable = errors.New("interview in progress cannot be deleted")
 )
 
 // 面试场景枚举
@@ -268,4 +269,29 @@ func (s *InterviewService) ListMessages(userID, interviewID uint) ([]models.Inte
 	var list []models.InterviewMessage
 	err := s.db.Where("interview_id = ?", interviewID).Order("id ASC").Find(&list).Error
 	return list, err
+}
+
+// Delete 删除一条面试记录，并级联清理消息、评分和复盘报告。
+// 进行中（starting/ongoing/reviewing）的面试不允许删除，避免影响正在进行的会话。
+func (s *InterviewService) Delete(userID, interviewID uint) error {
+	interview, err := s.Get(userID, interviewID)
+	if err != nil {
+		return err
+	}
+	switch interview.Status {
+	case StatusStarting, StatusOngoing, StatusReviewing:
+		return ErrInterviewNotDeletable
+	}
+	return s.db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Where("interview_id = ?", interviewID).Delete(&models.InterviewMessage{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("interview_id = ?", interviewID).Delete(&models.InterviewScore{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("interview_id = ?", interviewID).Delete(&models.InterviewReport{}).Error; err != nil {
+			return err
+		}
+		return tx.Where("id = ? AND user_id = ?", interviewID, userID).Delete(&models.Interview{}).Error
+	})
 }

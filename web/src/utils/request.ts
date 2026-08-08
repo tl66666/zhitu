@@ -4,6 +4,7 @@ import { message } from 'ant-design-vue'
 import { useAuthStore } from '@/stores/auth'
 import { useAdminAuthStore } from '@/stores/admin'
 import router from '@/router'
+import { getBrowserToken, isBrowserScopedUrl } from '@/utils/browserScope'
 
 // 创建 axios 实例
 const request: AxiosInstance = axios.create({
@@ -25,6 +26,9 @@ function isAdminRequest(url: string | undefined): boolean {
 request.interceptors.request.use(
   (config: InternalAxiosRequestConfig) => {
     const url = config.url
+    if (isBrowserScopedUrl(url)) {
+      config.headers['X-Browser-Token'] = getBrowserToken()
+    }
     if (isAdminRequest(url)) {
       // 管理端请求 → 管理员 token
       const adminStore = useAdminAuthStore()

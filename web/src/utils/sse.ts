@@ -3,6 +3,7 @@
 import type { SSECallbacks, SSEEvent } from '@/types/models'
 import { useAuthStore } from '@/stores/auth'
 import { useAdminAuthStore } from '@/stores/admin'
+import { getBrowserToken, isBrowserScopedUrl } from '@/utils/browserScope'
 
 // 获取 API 基础地址
 const baseURL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8080'
@@ -48,6 +49,9 @@ export async function streamSSE(
   }
   if (token) {
     headers.Authorization = `Bearer ${token}`
+  }
+  if (isBrowserScopedUrl(url)) {
+    headers['X-Browser-Token'] = getBrowserToken()
   }
 
   let response: Response
@@ -212,6 +216,9 @@ export async function streamSSEWithForm(
   }
   if (token) {
     headers.Authorization = `Bearer ${token}`
+  }
+  if (isBrowserScopedUrl(url)) {
+    headers['X-Browser-Token'] = getBrowserToken()
   }
 
   let response: Response

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
 
 	"github.com/zhitu/server/internal/models"
 	"gorm.io/gorm"
@@ -11,11 +12,12 @@ import (
 
 // 投递相关错误
 var (
-	ErrDeliveryNotFound  = errors.New("delivery not found")
-	ErrRoundNotFound     = errors.New("delivery round not found")
-	ErrFeedbackNotFound  = errors.New("delivery feedback not found")
-	ErrInvalidStatus     = errors.New("invalid delivery status")
-	ErrInvalidTransition = errors.New("invalid status transition")
+	ErrDeliveryNotFound      = errors.New("delivery not found")
+	ErrRoundNotFound         = errors.New("delivery round not found")
+	ErrFeedbackNotFound      = errors.New("delivery feedback not found")
+	ErrResumeVersionNotFound = errors.New("resume version not found")
+	ErrInvalidStatus         = errors.New("invalid delivery status")
+	ErrInvalidTransition     = errors.New("invalid status transition")
 )
 
 // 合法的状态集合
@@ -130,6 +132,15 @@ func (s *DeliveryService) Create(userID uint, in *CreateDeliveryInput) (*models.
 	if !validPriority(in.Priority) {
 		return nil, fmt.Errorf("invalid priority: %s", in.Priority)
 	}
+	if in.ResumeVerID != 0 {
+		belongs, err := s.resumeVersionBelongsToUser(userID, in.ResumeVerID)
+		if err != nil {
+			return nil, err
+		}
+		if !belongs {
+			return nil, ErrResumeVersionNotFound
+		}
+	}
 	d := &models.Delivery{
 		UserID:      userID,
 		Company:     in.Company,
@@ -173,6 +184,20 @@ func (s *DeliveryService) Update(userID, id uint, updates map[string]interface{}
 			return fmt.Errorf("invalid priority: %v", v)
 		}
 	}
+	if v, ok := filtered["resume_version_id"]; ok {
+		versionID, ok := deliveryUpdateUint(v)
+		if !ok || versionID == 0 {
+			return ErrResumeVersionNotFound
+		}
+		belongs, err := s.resumeVersionBelongsToUser(userID, versionID)
+		if err != nil {
+			return err
+		}
+		if !belongs {
+			return ErrResumeVersionNotFound
+		}
+		filtered["resume_version_id"] = versionID
+	}
 	if len(filtered) == 0 {
 		return nil
 	}
@@ -184,6 +209,52 @@ func (s *DeliveryService) Update(userID, id uint, updates map[string]interface{}
 		return ErrDeliveryNotFound
 	}
 	return nil
+}
+
+func (s *DeliveryService) resumeVersionBelongsToUser(userID, versionID uint) (bool, error) {
+	var count int64
+	err := s.db.Model(&models.ResumeVersion{}).
+		Joins("JOIN resumes ON resumes.id = resume_versions.resume_id").
+		Where("resume_versions.id = ? AND resumes.user_id = ?", versionID, userID).
+		Count(&count).Error
+	return count > 0, err
+}
+
+func deliveryUpdateUint(value interface{}) (uint, bool) {
+	switch v := value.(type) {
+	case uint:
+		return v, true
+	case uint8:
+		return uint(v), true
+	case uint16:
+		return uint(v), true
+	case uint32:
+		return uint(v), true
+	case uint64:
+		return uint(v), uint64(uint(v)) == v
+	case int:
+		return uint(v), v >= 0
+	case int8:
+		return uint(v), v >= 0
+	case int16:
+		return uint(v), v >= 0
+	case int32:
+		return uint(v), v >= 0
+	case int64:
+		return uint(v), v >= 0
+	case float64:
+		return uint(v), v >= 0 && v == float64(uint(v))
+	case float32:
+		return uint(v), v >= 0 && v == float32(uint(v))
+	case json.Number:
+		n, err := v.Int64()
+		return uint(n), err == nil && n >= 0
+	case string:
+		n, err := strconv.ParseUint(v, 10, 64)
+		return uint(n), err == nil && uint64(uint(n)) == n
+	default:
+		return 0, false
+	}
 }
 
 // Delete 删除投递记录（级联删除轮次与反馈）

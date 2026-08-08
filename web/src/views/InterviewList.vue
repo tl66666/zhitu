@@ -82,11 +82,21 @@
                   </td>
                   <!-- 创建时间列 -->
                   <td class="cell-created">{{ formatDate(record.created_at) }}</td>
-                  <!-- 操作列：文字按钮 -->
+                  <!-- 操作列：文字按钮 + 删除 -->
                   <td>
-                    <button class="action-btn" @click="enterRoom(record.id)">
-                      {{ record.status === 'completed' ? '查看复盘' : record.status === 'cancelled' ? '查看详情' : record.status === 'reviewing' || record.status === 'report_failed' ? '查看进度' : record.status === 'preparing' ? '进入候场' : '继续面试' }}
-                    </button>
+                    <div class="action-cell">
+                      <button class="action-btn" @click="enterRoom(record.id)">
+                        {{ record.status === 'completed' ? '查看复盘' : record.status === 'cancelled' ? '查看详情' : record.status === 'reviewing' || record.status === 'report_failed' ? '查看进度' : record.status === 'preparing' ? '进入候场' : '继续面试' }}
+                      </button>
+                      <button
+                        class="delete-btn"
+                        title="删除该面试记录"
+                        :disabled="isInProgress(record.status)"
+                        @click="handleDelete(record)"
+                      >
+                        <DeleteOutlined :style="{ fontSize: '14px' }" />
+                      </button>
+                    </div>
                   </td>
                 </tr>
               </tbody>
@@ -101,9 +111,11 @@
 <script setup lang="ts">
 import { onMounted } from 'vue'
 import { useRouter } from 'vue-router'
-import { PlusOutlined, InboxOutlined } from '@ant-design/icons-vue'
+import { PlusOutlined, InboxOutlined, DeleteOutlined } from '@ant-design/icons-vue'
+import { Modal } from 'ant-design-vue'
 import { useInterviewStore } from '@/stores/interview'
 import type {
+  Interview,
   InterviewScene,
   InterviewMode,
   InterviewDifficulty,
@@ -212,6 +224,25 @@ const goNew = () => {
 // 进入面试房间
 const enterRoom = (id: number) => {
   router.push(`/app/interviews/${id}`)
+}
+
+// 进行中的面试不允许删除（starting/ongoing/reviewing）
+const isInProgress = (status: string): boolean => {
+  return status === 'starting' || status === 'ongoing' || status === 'reviewing'
+}
+
+// 删除面试记录（二次确认）
+const handleDelete = (record: Interview) => {
+  Modal.confirm({
+    title: '删除面试记录',
+    content: `确定删除「${record.target_position || '未指定职位'}」的面试记录吗？相关的问答、评分和复盘报告将一并清除，且无法恢复。`,
+    okText: '删除',
+    okType: 'danger',
+    cancelText: '取消',
+    async onOk() {
+      await interviewStore.removeInterview(record.id)
+    },
+  })
 }
 
 onMounted(() => {
@@ -360,7 +391,7 @@ onMounted(() => {
 .col-progress { width: 100px; }
 .col-status { width: 110px; }
 .col-created { width: 160px; }
-.col-action { width: 110px; }
+.col-action { width: 150px; }
 
 /* 表体行：hover 时 background-100 底色 */
 .table-row {
@@ -499,6 +530,46 @@ onMounted(() => {
 .action-btn:active {
   transform: translateY(0);
   opacity: 0.9;
+}
+
+/* 操作列容器：主按钮 + 删除按钮 */
+.action-cell {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* 删除按钮：幽灵图标按钮，hover 时变红 */
+.delete-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 9999px;
+  background: var(--card);
+  color: var(--muted-foreground);
+  cursor: pointer;
+  font-family: inherit;
+  transition: color 0.15s ease, border-color 0.15s ease, background 0.15s ease;
+  flex-shrink: 0;
+}
+
+.delete-btn:hover:not(:disabled) {
+  color: var(--state-error);
+  border-color: var(--state-error);
+  background: var(--state-error-surface);
+}
+
+.delete-btn:active:not(:disabled) {
+  opacity: 0.85;
+}
+
+.delete-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
 }
 
 /* 进行中状态脉动动画 */

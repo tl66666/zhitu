@@ -2,6 +2,11 @@ import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
 import { message } from 'ant-design-vue'
 import { chatCopilot } from '@/api/copilot'
+import {
+  deleteCopilotSessionsState,
+  getCopilotSessionsState,
+  putCopilotSessionsState,
+} from '@/api/browserState'
 import type {
   CopilotChatRequest,
   CopilotMessage,
@@ -10,15 +15,8 @@ import type {
   CopilotTask,
 } from '@/types/models'
 
-const DB_NAME = 'zhitu-copilot'
-const DB_VERSION = 1
-const STORE_NAME = 'sessions'
 const COOKIE_NAME = 'zhitu-copilot-session'
-const FALLBACK_KEY = 'zhitu-copilot-sessions'
 
-// IndexedDB structured clone cannot persist Vue's reactive Proxy objects.
-// Keep a plain JSON snapshot at the storage boundary so persistence never
-// blocks the actual Copilot request with a DataCloneError.
 const toPersistedSession = (session: CopilotSession): CopilotSession =>
   JSON.parse(JSON.stringify(session)) as CopilotSession
 
@@ -41,68 +39,14 @@ const uuid = () => {
   return `copilot-${Date.now()}-${Math.random().toString(36).slice(2)}`
 }
 
-const openDB = (): Promise<IDBDatabase | null> => new Promise((resolve) => {
-  if (typeof indexedDB === 'undefined') {
-    resolve(null)
-    return
-  }
-  const request = indexedDB.open(DB_NAME, DB_VERSION)
-  request.onupgradeneeded = () => {
-    if (!request.result.objectStoreNames.contains(STORE_NAME)) request.result.createObjectStore(STORE_NAME, { keyPath: 'id' })
-  }
-  request.onsuccess = () => resolve(request.result)
-  request.onerror = () => resolve(null)
-})
-
 const readSessions = async (): Promise<CopilotSession[]> => {
-  const db = await openDB()
-  if (!db) {
-    try { return JSON.parse(localStorage.getItem(FALLBACK_KEY) || '[]') as CopilotSession[] } catch { return [] }
-  }
-  return new Promise((resolve) => {
-    const request = db.transaction(STORE_NAME, 'readonly').objectStore(STORE_NAME).getAll()
-    request.onsuccess = () => resolve((request.result || []) as CopilotSession[])
-    request.onerror = () => resolve([])
-  })
+  const response = await getCopilotSessionsState<CopilotSession[]>()
+  return Array.isArray(response.data.data.value) ? response.data.data.value : []
 }
 
-const writeSession = async (session: CopilotSession) => {
-  const snapshot = toPersistedSession(session)
-  const db = await openDB()
-  if (!db) {
-    const sessions = await readSessions()
-    const next = [snapshot, ...sessions.filter((item) => item.id !== snapshot.id)].slice(0, 30)
-    try {
-      localStorage.setItem(FALLBACK_KEY, JSON.stringify(next))
-    } catch {
-      // Browser storage is optional; the model request must still be sent.
-    }
-    return
-  }
-  await new Promise<void>((resolve) => {
-    try {
-      const request = db.transaction(STORE_NAME, 'readwrite').objectStore(STORE_NAME).put(snapshot)
-      request.onsuccess = () => resolve()
-      request.onerror = () => resolve()
-    } catch {
-      // A storage failure must not prevent the model request from running.
-      resolve()
-    }
-  })
-}
-
-const deleteSession = async (id: string) => {
-  const db = await openDB()
-  if (!db) {
-    const sessions = await readSessions()
-    localStorage.setItem(FALLBACK_KEY, JSON.stringify(sessions.filter((item) => item.id !== id)))
-    return
-  }
-  await new Promise<void>((resolve) => {
-    const request = db.transaction(STORE_NAME, 'readwrite').objectStore(STORE_NAME).delete(id)
-    request.onsuccess = () => resolve()
-    request.onerror = () => resolve()
-  })
+const writeSessions = async (sessions: CopilotSession[]) => {
+  const snapshots = sessions.slice(0, 30).map(toPersistedSession)
+  await putCopilotSessionsState(snapshots)
 }
 
 export const useCopilotStore = defineStore('copilot', () => {
@@ -118,17 +62,19 @@ export const useCopilotStore = defineStore('copilot', () => {
     if (index >= 0) sessions.value[index] = snapshot
     else sessions.value.unshift(snapshot)
     sessions.value.sort((a, b) => b.updated_at.localeCompare(a.updated_at))
-    try {
-      await writeSession(snapshot)
-    } catch {
-      // Local history is a convenience and must never block the server request.
-    }
+    await writeSessions(sessions.value)
     setCookieValue(snapshot.id)
   }
 
   const init = async () => {
     if (initialized.value) return
-    sessions.value = (await readSessions()).sort((a, b) => b.updated_at.localeCompare(a.updated_at))
+    try {
+      sessions.value = (await readSessions()).sort((a, b) => b.updated_at.localeCompare(a.updated_at))
+    } catch (error) {
+      console.error('加载 Copilot 历史失败:', error)
+      message.error('加载 Copilot 历史失败，请刷新重试')
+      sessions.value = []
+    }
     const remembered = cookieValue()
     activeSessionId.value = sessions.value.some((item) => item.id === remembered)
       ? remembered
@@ -187,6 +133,8 @@ export const useCopilotStore = defineStore('copilot', () => {
     await persist(session)
     loading.value = true
     let success = false
+    let pendingPersist: Promise<void> = Promise.resolve()
+    let streamingMessage: CopilotMessage | null = null
     try {
       const request: CopilotChatRequest = {
         task: session.task,
@@ -199,35 +147,55 @@ export const useCopilotStore = defineStore('copilot', () => {
       }
       await chatCopilot(request, {
         onStatus: () => undefined,
+        onDelta: (delta) => {
+          if (!streamingMessage) {
+            streamingMessage = {
+              role: 'assistant',
+              content: '',
+              created_at: new Date().toISOString(),
+            }
+            session.messages.push(streamingMessage)
+          }
+          streamingMessage.content += delta
+          session.updated_at = new Date().toISOString()
+        },
         onCopilotDone: (data) => {
           const result = data.result
           const reply = data.message?.content || result?.reply || ''
           if (!reply && !result) return
-          const assistant: CopilotMessage = {
-            role: 'assistant',
-            content: reply || '分析已完成，请查看下方结果。',
-            created_at: new Date().toISOString(),
-            result,
+          if (streamingMessage) {
+            streamingMessage.content = reply || streamingMessage.content || '分析已完成，请查看下方结果。'
+            streamingMessage.result = result
+          } else {
+            session.messages.push({
+              role: 'assistant',
+              content: reply || '分析已完成，请查看下方结果。',
+              created_at: new Date().toISOString(),
+              result,
+            })
           }
-          session.messages.push(assistant)
-          session.summary = data.memory_summary || result.memory_summary || session.summary
+          session.summary = data.memory_summary || result?.memory_summary || session.summary
           session.updated_at = new Date().toISOString()
-          void persist(session)
+          pendingPersist = persist(session)
           success = true
           if (result) input.onResult?.(result)
         },
         onError: (error) => {
-          const failure: CopilotMessage = {
-            role: 'assistant',
-            content: error || 'Copilot 暂时无法回答',
-            created_at: new Date().toISOString(),
+          if (streamingMessage) {
+            streamingMessage.content = error || 'Copilot 暂时无法回答'
+          } else {
+            session.messages.push({
+              role: 'assistant',
+              content: error || 'Copilot 暂时无法回答',
+              created_at: new Date().toISOString(),
+            })
           }
-          session.messages.push(failure)
           session.updated_at = new Date().toISOString()
-          void persist(session)
+          pendingPersist = persist(session)
           message.error(error || 'Copilot 暂时无法回答')
         },
       })
+      await pendingPersist
       return success
     } catch (error) {
       console.error('Copilot 请求失败:', error)
@@ -238,8 +206,8 @@ export const useCopilotStore = defineStore('copilot', () => {
   }
 
   const remove = async (id: string) => {
-    await deleteSession(id)
     sessions.value = sessions.value.filter((item) => item.id !== id)
+    await writeSessions(sessions.value)
     if (activeSessionId.value === id) {
       activeSessionId.value = sessions.value[0]?.id || ''
       if (activeSessionId.value) setCookieValue(activeSessionId.value)
@@ -247,7 +215,7 @@ export const useCopilotStore = defineStore('copilot', () => {
   }
 
   const clearAll = async () => {
-    for (const session of sessions.value) await deleteSession(session.id)
+    await deleteCopilotSessionsState()
     sessions.value = []
     activeSessionId.value = ''
     setCookieValue('')

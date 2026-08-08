@@ -1,6 +1,7 @@
 package services
 
 import (
+	"errors"
 	"fmt"
 	"testing"
 
@@ -50,5 +51,38 @@ func TestDeliveryDeleteScopesRecordAndChildren(t *testing.T) {
 	}
 	if otherCount != 1 {
 		t.Fatalf("other user's delivery count = %d, want 1", otherCount)
+	}
+}
+
+func TestDeliveryCreateScopesResumeVersion(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(fmt.Sprintf("file:%s?mode=memory&cache=shared", t.Name())), &gorm.Config{
+		DisableForeignKeyConstraintWhenMigrating: true,
+	})
+	if err != nil {
+		t.Fatalf("open database: %v", err)
+	}
+	if err := db.AutoMigrate(&models.Resume{}, &models.ResumeVersion{}, &models.Delivery{}); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+
+	resume := models.Resume{UserID: 7, Name: "后端简历"}
+	if err := db.Create(&resume).Error; err != nil {
+		t.Fatalf("create resume: %v", err)
+	}
+	version := models.ResumeVersion{ResumeID: resume.ID, VersionLabel: "v1.0", Content: "{}"}
+	if err := db.Create(&version).Error; err != nil {
+		t.Fatalf("create resume version: %v", err)
+	}
+
+	service := NewDeliveryService(db)
+	input := &CreateDeliveryInput{
+		Company: "示例公司", Position: "后端工程师", Channel: models.ChannelOfficial,
+		ApplyDate: "2026-08-08", ResumeVerID: version.ID,
+	}
+	if _, err := service.Create(7, input); err != nil {
+		t.Fatalf("owner create: %v", err)
+	}
+	if _, err := service.Create(8, input); !errors.Is(err, ErrResumeVersionNotFound) {
+		t.Fatalf("cross-user create error = %v, want ErrResumeVersionNotFound", err)
 	}
 }

@@ -158,39 +158,88 @@ type resumeCopilotContext struct {
 }
 
 func (s *ResumeCopilotService) Chat(ctx context.Context, userID uint, in *CopilotInput) (*CopilotResponse, error) {
+	contextData, messages, err := s.prepareChat(userID, in)
+	if err != nil {
+		return nil, err
+	}
+	generated, err := s.generateCopilotJSON(ctx, messages, in.Task)
+	if err != nil {
+		return nil, err
+	}
+	return buildCopilotResponse(in, contextData, generated), nil
+}
+
+// ChatStream streams the user-facing reply while keeping the structured Copilot
+// result intact for task-specific cards and proposal actions.
+func (s *ResumeCopilotService) ChatStream(ctx context.Context, userID uint, in *CopilotInput, onDelta func(string)) (*CopilotResponse, error) {
+	contextData, messages, err := s.prepareChat(userID, in)
+	if err != nil {
+		return nil, err
+	}
+	if s.llm == nil {
+		return nil, ErrLLMNotConfigured
+	}
+
+	var raw strings.Builder
+	replyStream := copilotReplyStreamer{}
+	err = s.llm.ChatStream(ctx, messages, func(delta string) {
+		raw.WriteString(delta)
+		if onDelta == nil {
+			return
+		}
+		if visible := replyStream.Push(raw.String()); visible != "" {
+			onDelta(visible)
+		}
+	})
+	if err != nil {
+		return nil, fmt.Errorf("copilot llm stream: %w", err)
+	}
+
+	var generated copilotLLMResponse
+	if err := decodeCopilotLLMResponse(raw.String(), &generated); err != nil || !completeCopilotLLMResponse(in.Task, &generated) {
+		retryGenerated, retryErr := s.retryCopilotJSON(ctx, messages, in.Task)
+		if retryErr != nil {
+			return nil, retryErr
+		}
+		generated = *retryGenerated
+	}
+	return buildCopilotResponse(in, contextData, &generated), nil
+}
+
+func (s *ResumeCopilotService) prepareChat(userID uint, in *CopilotInput) (*resumeCopilotContext, []ChatMessage, error) {
 	if _, ok := validCopilotTasks[in.Task]; !ok {
-		return nil, ErrCopilotInvalidTask
+		return nil, nil, ErrCopilotInvalidTask
 	}
 	if len(in.Messages) > maxCopilotMessages {
 		in.Messages = in.Messages[len(in.Messages)-maxCopilotMessages:]
 	}
 	for _, msg := range in.Messages {
 		if msg.Role != "user" && msg.Role != "assistant" {
-			return nil, errors.New("copilot messages may only use user or assistant roles")
+			return nil, nil, errors.New("copilot messages may only use user or assistant roles")
 		}
 		if runeLen(msg.Content) > maxCopilotMessageRunes {
-			return nil, ErrCopilotContentTooLong
+			return nil, nil, ErrCopilotContentTooLong
 		}
 	}
 	if runeLen(in.DraftContent) > maxCopilotContentRunes {
-		return nil, ErrCopilotContentTooLong
+		return nil, nil, ErrCopilotContentTooLong
 	}
 
 	contextData, err := s.loadContext(userID, in)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if requiresJD(in.Task) && strings.TrimSpace(in.JD) == "" && strings.TrimSpace(contextData.Resume.TargetJD) == "" {
-		return nil, ErrCopilotJDRequired
+		return nil, nil, ErrCopilotJDRequired
 	}
 	if in.Task == CopilotTaskProjectOptimize && len(contextData.Content.Project) == 0 {
-		return nil, ErrCopilotProjectEmpty
+		return nil, nil, ErrCopilotProjectEmpty
 	}
 	if in.Task == CopilotTaskProjectOptimize && in.ProjectIndex == nil {
-		return nil, ErrCopilotProjectNeeded
+		return nil, nil, ErrCopilotProjectNeeded
 	}
 	if in.ProjectIndex != nil && (*in.ProjectIndex < 0 || *in.ProjectIndex >= len(contextData.Content.Project)) {
-		return nil, ErrCopilotProjectRange
+		return nil, nil, ErrCopilotProjectRange
 	}
 
 	prompt := s.buildPrompt(in, contextData)
@@ -199,12 +248,16 @@ func (s *ResumeCopilotService) Chat(ctx context.Context, userID uint, in *Copilo
 		messages = append(messages, ChatMessage{Role: item.Role, Content: item.Content})
 	}
 	messages = append(messages, ChatMessage{Role: "user", Content: prompt})
+	return contextData, messages, nil
+}
+
+func (s *ResumeCopilotService) generateCopilotJSON(ctx context.Context, messages []ChatMessage, task string) (*copilotLLMResponse, error) {
 	if s.llm == nil {
 		return nil, ErrLLMNotConfigured
 	}
 	var generated copilotLLMResponse
 	chatErr := s.llm.ChatJSON(ctx, messages, &generated)
-	needsRetry := chatErr == nil && !completeCopilotLLMResponse(in.Task, &generated)
+	needsRetry := chatErr == nil && !completeCopilotLLMResponse(task, &generated)
 	if chatErr != nil {
 		if !errors.Is(chatErr, ErrLLMInvalidJSON) && !errors.Is(chatErr, ErrLLMEmptyResponse) {
 			return nil, fmt.Errorf("copilot llm: %w", chatErr)
@@ -212,20 +265,25 @@ func (s *ResumeCopilotService) Chat(ctx context.Context, userID uint, in *Copilo
 		needsRetry = true
 	}
 	if needsRetry {
-		// MiMo occasionally wraps or truncates structured output. Retry once with
-		// an explicit schema reminder when JSON is malformed or a task-specific
-		// result object is missing.
-		retryMessages := append([]ChatMessage(nil), messages...)
-		retryMessages[len(retryMessages)-1].Content += "\n\n只返回一个完整、合法的 JSON 对象；不要添加解释、前缀或 Markdown 代码块。\n" + copilotTaskOutputSchema(in.Task)
-		generated = copilotLLMResponse{}
-		if retryErr := s.llm.ChatJSON(ctx, retryMessages, &generated); retryErr != nil {
-			return nil, fmt.Errorf("copilot llm retry: %w", retryErr)
-		}
-		if !completeCopilotLLMResponse(in.Task, &generated) {
-			return nil, fmt.Errorf("copilot llm retry: %w: missing task result", ErrLLMInvalidJSON)
-		}
+		return s.retryCopilotJSON(ctx, messages, task)
 	}
+	return &generated, nil
+}
 
+func (s *ResumeCopilotService) retryCopilotJSON(ctx context.Context, messages []ChatMessage, task string) (*copilotLLMResponse, error) {
+	retryMessages := append([]ChatMessage(nil), messages...)
+	retryMessages[len(retryMessages)-1].Content += "\n\n只返回一个完整、合法的 JSON 对象；不要添加解释、前缀或 Markdown 代码块。\n" + copilotTaskOutputSchema(task)
+	var generated copilotLLMResponse
+	if retryErr := s.llm.ChatJSON(ctx, retryMessages, &generated); retryErr != nil {
+		return nil, fmt.Errorf("copilot llm retry: %w", retryErr)
+	}
+	if !completeCopilotLLMResponse(task, &generated) {
+		return nil, fmt.Errorf("copilot llm retry: %w: missing task result", ErrLLMInvalidJSON)
+	}
+	return &generated, nil
+}
+
+func buildCopilotResponse(in *CopilotInput, contextData *resumeCopilotContext, generated *copilotLLMResponse) *CopilotResponse {
 	result := &CopilotResponse{
 		Task:  in.Task,
 		Reply: strings.TrimSpace(generated.Reply),
@@ -244,7 +302,80 @@ func (s *ResumeCopilotService) Chat(ctx context.Context, userID uint, in *Copilo
 	if result.Match != nil {
 		normalizeMatchResult(result.Match)
 	}
-	return result, nil
+	return result
+}
+
+func decodeCopilotLLMResponse(content string, out *copilotLLMResponse) error {
+	content = strings.TrimSpace(content)
+	if err := json.Unmarshal([]byte(content), out); err == nil {
+		return nil
+	}
+	if extracted := extractJSONBlock(content); extracted != "" {
+		if err := json.Unmarshal([]byte(extracted), out); err == nil {
+			return nil
+		}
+	}
+	if extracted := extractJSONObject(content); extracted != "" {
+		if err := json.Unmarshal([]byte(extracted), out); err == nil {
+			return nil
+		}
+	}
+	return ErrLLMInvalidJSON
+}
+
+type copilotReplyStreamer struct {
+	emitted string
+}
+
+func (s *copilotReplyStreamer) Push(raw string) string {
+	value := partialCopilotReply(raw)
+	if value == "" || !strings.HasPrefix(value, s.emitted) {
+		return ""
+	}
+	delta := value[len(s.emitted):]
+	s.emitted = value
+	return delta
+}
+
+func partialCopilotReply(raw string) string {
+	key := strings.Index(raw, `"reply"`)
+	if key < 0 {
+		return ""
+	}
+	colon := strings.IndexByte(raw[key+len(`"reply"`):], ':')
+	if colon < 0 {
+		return ""
+	}
+	valueStart := key + len(`"reply"`) + colon + 1
+	for valueStart < len(raw) && (raw[valueStart] == ' ' || raw[valueStart] == '\n' || raw[valueStart] == '\r' || raw[valueStart] == '\t') {
+		valueStart++
+	}
+	if valueStart >= len(raw) || raw[valueStart] != '"' {
+		return ""
+	}
+	escaped := false
+	for i := valueStart + 1; i < len(raw); i++ {
+		if escaped {
+			escaped = false
+			continue
+		}
+		if raw[i] == '\\' {
+			escaped = true
+			continue
+		}
+		if raw[i] == '"' {
+			var value string
+			if json.Unmarshal([]byte(raw[valueStart:i+1]), &value) == nil {
+				return value
+			}
+			return ""
+		}
+	}
+	var value string
+	if json.Unmarshal([]byte(raw[valueStart:]+`"`), &value) == nil {
+		return value
+	}
+	return ""
 }
 
 func completeCopilotLLMResponse(task string, generated *copilotLLMResponse) bool {

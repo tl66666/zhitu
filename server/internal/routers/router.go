@@ -15,18 +15,19 @@ import (
 
 // Deps 路由初始化所需依赖
 type Deps struct {
-	Config           *config.Config
-	DB               *gorm.DB
-	JWTService       *services.JWTService
-	AuthService      *services.AuthService
-	LLMService       *services.LLMService
-	AuthHandler      *handlers.AuthHandler
-	ProfileHandler   *handlers.ProfileHandler
-	ResumeHandler    *handlers.ResumeHandler
-	CopilotHandler   *handlers.CopilotHandler
-	InterviewHandler *handlers.InterviewHandler
-	DeliveryHandler  *handlers.DeliveryHandler
-	AdminHandler     *handlers.AdminHandler
+	Config              *config.Config
+	DB                  *gorm.DB
+	JWTService          *services.JWTService
+	AuthService         *services.AuthService
+	LLMService          *services.LLMService
+	AuthHandler         *handlers.AuthHandler
+	ProfileHandler      *handlers.ProfileHandler
+	ResumeHandler       *handlers.ResumeHandler
+	CopilotHandler      *handlers.CopilotHandler
+	BrowserStateHandler *handlers.BrowserStateHandler
+	InterviewHandler    *handlers.InterviewHandler
+	DeliveryHandler     *handlers.DeliveryHandler
+	AdminHandler        *handlers.AdminHandler
 }
 
 // New 构造 gin 引擎并注册全部路由
@@ -87,10 +88,10 @@ func New(deps Deps) *gin.Engine {
 
 	// ---------- 业务模块（需登录，普通用户与管理员均可访问） ----------
 	v1 := api.Group("/v1")
-	v1.Use(middleware.JWTAuth(deps.JWTService))
+	v1.Use(middleware.JWTAuth(deps.JWTService), middleware.BrowserWorkspaceScope(deps.DB))
 	{
 		v1.GET("/_ping", func(c *gin.Context) {
-			utils.OK(c, gin.H{"message": "auth ok", "module": "v1"})
+			utils.OK(c, gin.H{"message": "auth ok", "module": "v1", "workspace_id": c.GetUint(middleware.ContextWorkspaceID)})
 		})
 
 		// ---------- 用户档案 ----------
@@ -142,12 +143,20 @@ func New(deps Deps) *gin.Engine {
 			copilot.POST("/apply", deps.CopilotHandler.Apply)
 		}
 
+		browserState := v1.Group("/browser-state")
+		{
+			browserState.GET("/:key", deps.BrowserStateHandler.Get)
+			browserState.PUT("/:key", deps.BrowserStateHandler.Put)
+			browserState.DELETE("/:key", deps.BrowserStateHandler.Delete)
+		}
+
 		// ---------- 模拟面试 ----------
 		interviews := v1.Group("/interviews")
 		{
 			interviews.GET("", deps.InterviewHandler.List)
 			interviews.POST("", deps.InterviewHandler.Create)
 			interviews.GET("/:id", deps.InterviewHandler.Get)
+			interviews.DELETE("/:id", deps.InterviewHandler.Delete)
 			interviews.POST("/:id/start", deps.InterviewHandler.Start)
 			interviews.PATCH("/:id/mode", deps.InterviewHandler.SetMode)
 			interviews.POST("/:id/resume", deps.InterviewHandler.AttachResume)
@@ -187,9 +196,6 @@ func New(deps Deps) *gin.Engine {
 			deliveries.DELETE("/:id/feedbacks/:fid", deps.DeliveryHandler.DeleteFeedback)
 		}
 	}
-
-	// 静态文件服务：/static/* 映射到存储目录，用于访问上传的音频、TTS、简历文件
-	r.Static("/static", deps.Config.Storage.BaseDir)
 
 	// 404 兜底
 	r.NoRoute(func(c *gin.Context) {

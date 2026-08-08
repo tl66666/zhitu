@@ -3,6 +3,7 @@
 <script setup lang="ts">
 import { ref, reactive, computed, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
+import { listResumes } from '@/api/resume'
 import { useDeliveryStore } from '@/stores/delivery'
 import { message, Modal } from 'ant-design-vue'
 import type { FormInstance } from 'ant-design-vue'
@@ -13,6 +14,7 @@ import type {
   CreateDeliveryRequest,
   CreateRoundRequest,
   CreateFeedbackRequest,
+  Resume,
 } from '@/types/models'
 import dayjs, { Dayjs } from 'dayjs'
 // 使用 @ant-design/icons-vue，不再使用 lucide-vue-next
@@ -398,7 +400,7 @@ const handlePaste = (e: ClipboardEvent) => {
   }
 }
 
-const handleQuickCapture = () => {
+const handleQuickCapture = async () => {
   const text = quickCapture.value.trim()
   if (!text) return
   const parsed = quickCaptureParsed.value
@@ -415,7 +417,7 @@ const handleQuickCapture = () => {
   }
   createForm.company = text
   createForm.jd_text = text.length > 20 ? text : ''
-  createModalVisible.value = true
+  await showCreateModal()
   quickCapture.value = ''
   quickCaptureParsed.value = {}
 }
@@ -462,12 +464,13 @@ const handleKeydown = (e: KeyboardEvent) => {
 // ==================== 新增投递 ====================
 const createModalVisible = ref(false)
 const createFormRef = ref<FormInstance>()
+const resumes = ref<Resume[]>([])
+const resumeOptions = computed(() => resumes.value.filter((resume) => resume.current_version_id > 0))
 const createForm = reactive<CreateDeliveryRequest & { apply_date?: Dayjs }>({
   company: '',
   position: '',
   channel: 'boss',
   apply_date: undefined,
-  priority: 'medium',
   jd_text: '',
   remark: '',
   resume_version_id: undefined,
@@ -478,9 +481,21 @@ const createRules = {
   position: [{ required: true, message: '请输入职位名称', trigger: 'blur' }],
   channel: [{ required: true, message: '请选择投递渠道', trigger: 'change' }],
   apply_date: [{ required: true, message: '请选择投递日期', trigger: 'change' }],
+  resume_version_id: [{ required: true, message: '请选择简历', trigger: 'change' }],
 }
 
-const showCreateModal = () => {
+const loadResumes = async () => {
+  try {
+    const response = await listResumes()
+    resumes.value = response.data.data || []
+  } catch (error) {
+    console.error('加载简历列表失败:', error)
+    message.error('加载简历列表失败')
+  }
+}
+
+const showCreateModal = async () => {
+  await loadResumes()
   createModalVisible.value = true
 }
 
@@ -492,7 +507,6 @@ const handleCreate = async () => {
       position: createForm.position,
       channel: createForm.channel as CreateDeliveryRequest['channel'],
       apply_date: createForm.apply_date?.format('YYYY-MM-DD') || '',
-      priority: createForm.priority as CreateDeliveryRequest['priority'],
       jd_text: createForm.jd_text,
       remark: createForm.remark,
       resume_version_id: createForm.resume_version_id,
@@ -512,7 +526,6 @@ const resetCreateForm = () => {
     position: '',
     channel: 'boss',
     apply_date: undefined,
-    priority: 'medium',
     jd_text: '',
     remark: '',
     resume_version_id: undefined,
@@ -999,3 +1012,11 @@ onUnmounted(() => {
 <style scoped src="./styles/delivery-kanban-platform.css"></style>
 <style scoped src="./styles/delivery-kanban-detail.css"></style>
 <style scoped src="./styles/delivery-kanban-responsive.css"></style>
+<style scoped>
+.form-help {
+  margin-top: 6px;
+  color: var(--muted-foreground);
+  font-size: 12px;
+  line-height: 1.4;
+}
+</style>

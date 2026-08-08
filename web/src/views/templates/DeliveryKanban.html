@@ -685,12 +685,21 @@
             </a-form-item>
           </a-col>
           <a-col :span="8">
-            <a-form-item label="优先级" name="priority">
-              <a-select v-model:value="createForm.priority" placeholder="请选择">
-                <a-select-option value="high">高</a-select-option>
-                <a-select-option value="medium">中</a-select-option>
-                <a-select-option value="low">低</a-select-option>
+            <a-form-item label="选择简历" name="resume_version_id">
+              <a-select
+                v-model:value="createForm.resume_version_id"
+                placeholder="请选择简历"
+                :disabled="resumeOptions.length === 0"
+              >
+                <a-select-option
+                  v-for="resume in resumeOptions"
+                  :key="resume.id"
+                  :value="resume.current_version_id"
+                >
+                  {{ resume.name }} · v{{ resume.current_version_id }}
+                </a-select-option>
               </a-select>
+              <div v-if="resumeOptions.length === 0" class="form-help">暂无可用简历，请先创建简历</div>
             </a-form-item>
           </a-col>
         </a-row>

@@ -52,6 +52,8 @@ func main() {
 	resumeHandler := handlers.NewResumeHandler(resumeSvc, resumeAISvc)
 	copilotSvc := services.NewResumeCopilotService(llmSvc, resumeSvc, profileSvc)
 	copilotHandler := handlers.NewCopilotHandler(copilotSvc)
+	browserStateSvc := services.NewBrowserStateService(db)
+	browserStateHandler := handlers.NewBrowserStateHandler(browserStateSvc)
 	interviewSvc := services.NewInterviewService(db, llmSvc, profileSvc, &cfg.Storage)
 	interviewHandler := handlers.NewInterviewHandler(interviewSvc)
 	deliverySvc := services.NewDeliveryService(db)
@@ -61,25 +63,26 @@ func main() {
 
 	// 5. 初始化路由
 	engine := routers.New(routers.Deps{
-		Config:           cfg,
-		DB:               db,
-		JWTService:       jwtSvc,
-		AuthService:      authSvc,
-		LLMService:       llmSvc,
-		AuthHandler:      authHandler,
-		ProfileHandler:   profileHandler,
-		ResumeHandler:    resumeHandler,
-		CopilotHandler:   copilotHandler,
-		InterviewHandler: interviewHandler,
-		DeliveryHandler:  deliveryHandler,
-		AdminHandler:     adminHandler,
+		Config:              cfg,
+		DB:                  db,
+		JWTService:          jwtSvc,
+		AuthService:         authSvc,
+		LLMService:          llmSvc,
+		AuthHandler:         authHandler,
+		ProfileHandler:      profileHandler,
+		ResumeHandler:       resumeHandler,
+		CopilotHandler:      copilotHandler,
+		BrowserStateHandler: browserStateHandler,
+		InterviewHandler:    interviewHandler,
+		DeliveryHandler:     deliveryHandler,
+		AdminHandler:        adminHandler,
 	})
 
 	// 6. 启动 HTTP 服务（支持优雅关闭）
 	srv := &http.Server{
-		Addr:         fmt.Sprintf(":%d", cfg.Server.Port),
-		Handler:      engine,
-		ReadTimeout:  15 * time.Second,
+		Addr:        fmt.Sprintf(":%d", cfg.Server.Port),
+		Handler:     engine,
+		ReadTimeout: 15 * time.Second,
 		// AI/SSE handlers flush an initial status event before the model finishes.
 		// Keep the connection writable for the configured upstream model timeout;
 		// otherwise responses taking more than 15 seconds are silently truncated.

@@ -355,6 +355,20 @@ export const useInterviewStore = defineStore('interview', () => {
     }
   }
 
+  // 删除一条面试记录（含消息、评分、复盘）
+  const removeInterview = async (id: number) => {
+    try {
+      await interviewApi.deleteInterview(id)
+      interviews.value = interviews.value.filter((item) => item.id !== id)
+      if (currentInterview.value?.id === id) clearCurrent()
+      message.success('面试记录已删除')
+      return true
+    } catch (error) {
+      console.error('删除面试记录失败:', error)
+      return false
+    }
+  }
+
   // 获取复盘报告
   const fetchReport = async (id: number) => {
     try {
@@ -412,6 +426,7 @@ export const useInterviewStore = defineStore('interview', () => {
     playTts,
     endInterview,
     cancelInterview,
+    removeInterview,
     fetchReport,
     fetchScores,
     clearCurrent,

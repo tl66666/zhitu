@@ -1,4 +1,4 @@
-import { get, post, patch } from '@/utils/request'
+import { get, post, patch, del } from '@/utils/request'
 import { streamSSE, streamSSEWithForm } from '@/utils/sse'
 import type {
   ApiResponse,
@@ -23,6 +23,11 @@ export const getInterviews = listInterviews
 // 获取面试详情（含消息列表）
 export const getInterview = (id: number) => {
   return get<ApiResponse<InterviewDetail>>(`/api/v1/interviews/${id}`)
+}
+
+// 删除一条面试记录（含消息、评分、复盘）
+export const deleteInterview = (id: number) => {
+  return del<ApiResponse<{ id: number }>>(`/api/v1/interviews/${id}`)
 }
 
 // 创建面试会话

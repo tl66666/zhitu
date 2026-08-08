@@ -48,7 +48,7 @@
               </button>
               <template #overlay>
                 <a-menu @click="(e) => handleMenuClick(e.key, resume)">
-                  <a-menu-item key="edit">进入编辑</a-menu-item>
+                  <a-menu-item key="rename">重命名</a-menu-item>
                   <a-menu-item key="delete" danger>删除简历</a-menu-item>
                 </a-menu>
               </template>
@@ -76,43 +76,56 @@
             </div>
           </div>
 
-          <!-- 卡片底部：创建时间 + 编辑按钮 -->
+          <!-- 卡片底部：更新时间 -->
           <div class="card-foot">
             <span class="card-time">
               <ClockCircleOutlined />
               <span>{{ formatDate(resume.updated_at) }}</span>
             </span>
-            <button
-              class="btn-text"
-              type="button"
-              @click.stop="enterEditor(resume.id)"
-            >
-              <span>编辑</span>
-              <ArrowRightOutlined />
-            </button>
           </div>
         </article>
       </section>
     </a-spin>
+
+    <a-modal
+      v-model:open="renameModalVisible"
+      title="重命名简历"
+      :confirm-loading="renameLoading"
+      ok-text="保存"
+      cancel-text="取消"
+      @ok="handleRename"
+      @cancel="resetRename"
+    >
+      <a-input
+        v-model:value="renameValue"
+        placeholder="请输入简历名称"
+        :maxlength="100"
+        show-count
+        @press-enter="handleRename"
+      />
+    </a-modal>
   </div>
 </template>
 
 <script setup lang="ts">
-import { onMounted } from 'vue'
+import { onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { Modal } from 'ant-design-vue'
+import { message, Modal } from 'ant-design-vue'
 import {
   PlusOutlined,
   FileTextOutlined,
   MoreOutlined,
   ClockCircleOutlined,
-  ArrowRightOutlined,
 } from '@ant-design/icons-vue'
 import { useResumeStore } from '@/stores/resume'
 import type { Resume, ResumeScene } from '@/types/models'
 
 const router = useRouter()
 const resumeStore = useResumeStore()
+const renameModalVisible = ref(false)
+const renameLoading = ref(false)
+const renamingResume = ref<Resume | null>(null)
+const renameValue = ref('')
 
 // 场景标签文本
 const sceneLabel = (scene: ResumeScene | string): string => {
@@ -148,10 +161,43 @@ const enterEditor = (id: number) => {
   router.push(`/app/resumes/${id}`)
 }
 
-// 菜单点击：编辑 / 删除
+const openRenameModal = (resume: Resume) => {
+  renamingResume.value = resume
+  renameValue.value = resume.name
+  renameModalVisible.value = true
+}
+
+const resetRename = () => {
+  renameModalVisible.value = false
+  renamingResume.value = null
+  renameValue.value = ''
+}
+
+const handleRename = async () => {
+  const resume = renamingResume.value
+  const name = renameValue.value.trim()
+  if (!resume || !name) {
+    message.error('请输入简历名称')
+    return
+  }
+
+  renameLoading.value = true
+  try {
+    const updated = await resumeStore.update(resume.id, { name })
+    if (updated) {
+      const item = resumeStore.resumes.find((candidate) => candidate.id === resume.id)
+      if (item) item.name = name
+      resetRename()
+    }
+  } finally {
+    renameLoading.value = false
+  }
+}
+
+// 菜单点击：重命名 / 删除
 const handleMenuClick = (key: string, resume: Resume) => {
-  if (key === 'edit') {
-    enterEditor(resume.id)
+  if (key === 'rename') {
+    openRenameModal(resume)
   } else if (key === 'delete') {
     Modal.confirm({
       title: '确认删除',

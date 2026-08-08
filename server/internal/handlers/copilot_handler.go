@@ -37,7 +37,11 @@ func (h *CopilotHandler) Chat(c *gin.Context) {
 	fmt.Fprintf(c.Writer, "data: %s\n\n", status)
 	flusher.Flush()
 
-	result, err := h.svc.Chat(c.Request.Context(), userID, &in)
+	result, err := h.svc.ChatStream(c.Request.Context(), userID, &in, func(delta string) {
+		deltaData, _ := json.Marshal(map[string]string{"type": "delta", "content": delta})
+		fmt.Fprintf(c.Writer, "data: %s\n\n", deltaData)
+		flusher.Flush()
+	})
 	if err != nil {
 		errData, _ := json.Marshal(map[string]string{"type": "error", "message": err.Error()})
 		fmt.Fprintf(c.Writer, "data: %s\n\n", errData)

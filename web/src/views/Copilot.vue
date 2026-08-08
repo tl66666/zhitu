@@ -363,6 +363,10 @@ watch(resumePaste, (value) => {
 })
 
 watch(() => activeSession.value?.messages.length, scrollToBottom)
+watch(() => {
+  const messages = activeSession.value?.messages || []
+  return messages[messages.length - 1]?.content
+}, scrollToBottom)
 watch(() => copilotStore.loading, scrollToBottom)
 
 onMounted(async () => {

@@ -139,6 +139,28 @@ func (h *InterviewHandler) Cancel(c *gin.Context) {
 	utils.OKWithMsg(c, "interview cancelled", interview)
 }
 
+// Delete DELETE /api/v1/interviews/:id 删除一条面试记录（含消息、评分、复盘）
+func (h *InterviewHandler) Delete(c *gin.Context) {
+	userID := c.GetUint(middleware.ContextUserID)
+	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
+	if err != nil || id == 0 {
+		utils.BadRequest(c, "invalid interview id")
+		return
+	}
+	if err := h.svc.Delete(userID, uint(id)); err != nil {
+		switch err {
+		case services.ErrInterviewNotFound:
+			utils.NotFound(c, err.Error())
+		case services.ErrInterviewNotDeletable:
+			utils.Conflict(c, err.Error())
+		default:
+			utils.InternalError(c, err.Error())
+		}
+		return
+	}
+	utils.OKWithMsg(c, "interview deleted", gin.H{"id": id})
+}
+
 func (h *InterviewHandler) setSSEHeaders(c *gin.Context) {
 	c.Header("Content-Type", "text/event-stream")
 	c.Header("Cache-Control", "no-cache")
