@@ -117,6 +117,60 @@ func TestCancelOnlyAllowsPreparingInterview(t *testing.T) {
 	}
 }
 
+func TestDeleteAllowsEveryInterviewStatus(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file:delete_status_test?mode=memory&cache=shared"), &gorm.Config{
+		DisableForeignKeyConstraintWhenMigrating: true,
+	})
+	if err != nil {
+		t.Fatalf("open test database: %v", err)
+	}
+	if err := db.AutoMigrate(&models.Interview{}, &models.InterviewMessage{}, &models.InterviewScore{}, &models.InterviewReport{}); err != nil {
+		t.Fatalf("migrate test database: %v", err)
+	}
+
+	statuses := []string{
+		StatusPreparing, StatusStarting, StatusOngoing, StatusReviewing,
+		StatusCompleted, StatusReportFailed, StatusCancelled,
+	}
+	service := NewInterviewService(db, nil, nil, nil)
+	for _, status := range statuses {
+		t.Run(status, func(t *testing.T) {
+			interview := models.Interview{UserID: 1, Scene: SceneTech, Status: status}
+			if err := db.Create(&interview).Error; err != nil {
+				t.Fatalf("create interview: %v", err)
+			}
+			if err := db.Create(&models.InterviewMessage{InterviewID: interview.ID, Role: "user", Content: "测试回答"}).Error; err != nil {
+				t.Fatalf("create message: %v", err)
+			}
+			if err := db.Create(&models.InterviewScore{InterviewID: interview.ID, Dimension: "logic"}).Error; err != nil {
+				t.Fatalf("create score: %v", err)
+			}
+			if err := db.Create(&models.InterviewReport{InterviewID: interview.ID}).Error; err != nil {
+				t.Fatalf("create report: %v", err)
+			}
+
+			if err := service.Delete(1, interview.ID); err != nil {
+				t.Fatalf("Delete(%s) error = %v", status, err)
+			}
+			var deleted models.Interview
+			if err := db.First(&deleted, interview.ID).Error; !errors.Is(err, gorm.ErrRecordNotFound) {
+				t.Fatalf("interview after delete = %#v, err = %v", deleted, err)
+			}
+			for _, model := range []interface{}{
+				&models.InterviewMessage{}, &models.InterviewScore{}, &models.InterviewReport{},
+			} {
+				var count int64
+				if err := db.Model(model).Where("interview_id = ?", interview.ID).Count(&count).Error; err != nil {
+					t.Fatalf("count deleted records: %v", err)
+				}
+				if count != 0 {
+					t.Fatalf("records for status %s remain: %d", status, count)
+				}
+			}
+		})
+	}
+}
+
 func TestStartGeneratesResumeAndJDGroundedFirstQuestion(t *testing.T) {
 	requests := make(chan map[string]interface{}, 1)
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

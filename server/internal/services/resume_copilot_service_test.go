@@ -76,6 +76,27 @@ func TestCopilotTaskOutputSchemaIncludesProjectShape(t *testing.T) {
 	}
 }
 
+func TestEmitCopilotReplyChunksLargeDelta(t *testing.T) {
+	value := strings.Repeat("流式回复。", 12)
+	var chunks []string
+	emitCopilotReply(context.Background(), value, func(delta string) {
+		chunks = append(chunks, delta)
+	})
+	if len(chunks) < 2 {
+		t.Fatalf("chunks = %d, want multiple chunks", len(chunks))
+	}
+	var rebuilt strings.Builder
+	for _, chunk := range chunks {
+		if got := len([]rune(chunk)); got > copilotReplyChunkRunes {
+			t.Fatalf("chunk rune length = %d, want <= %d", got, copilotReplyChunkRunes)
+		}
+		rebuilt.WriteString(chunk)
+	}
+	if rebuilt.String() != value {
+		t.Fatalf("rebuilt reply = %q, want %q", rebuilt.String(), value)
+	}
+}
+
 func newCopilotTestService(t *testing.T) (*ResumeCopilotService, *gorm.DB, *models.Resume, *models.ResumeVersion) {
 	t.Helper()
 	db, err := gorm.Open(sqlite.Open(fmt.Sprintf("file:%s?mode=memory&cache=shared", t.Name())), &gorm.Config{

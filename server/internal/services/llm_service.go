@@ -77,12 +77,17 @@ type streamChunk struct {
 // anthropicRequest Anthropic Messages 请求体。
 // Anthropic 将 system 提示词放在顶层，其余消息只允许 user / assistant。
 type anthropicRequest struct {
-	Model       string        `json:"model"`
-	System      string        `json:"system,omitempty"`
-	Messages    []ChatMessage `json:"messages"`
-	Temperature float64       `json:"temperature,omitempty"`
-	MaxTokens   int           `json:"max_tokens"`
-	Stream      bool          `json:"stream,omitempty"`
+	Model       string             `json:"model"`
+	System      string             `json:"system,omitempty"`
+	Messages    []ChatMessage      `json:"messages"`
+	Temperature float64            `json:"temperature,omitempty"`
+	MaxTokens   int                `json:"max_tokens"`
+	Stream      bool               `json:"stream,omitempty"`
+	Thinking    *anthropicThinking `json:"thinking,omitempty"`
+}
+
+type anthropicThinking struct {
+	Type string `json:"type"`
 }
 
 type anthropicResponse struct {

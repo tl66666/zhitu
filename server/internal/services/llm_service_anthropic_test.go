@@ -66,6 +66,9 @@ func TestAnthropicChatUsesServerSideKeyAndMessagesProtocol(t *testing.T) {
 	if received.System != "system instruction" {
 		t.Errorf("system = %q", received.System)
 	}
+	if received.Thinking == nil || received.Thinking.Type != "disabled" {
+		t.Errorf("thinking = %#v, want disabled", received.Thinking)
+	}
 	if len(received.Messages) != 1 ||
 		received.Messages[0].Role != "user" ||
 		received.Messages[0].Content != "hello" {

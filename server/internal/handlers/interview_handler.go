@@ -151,8 +151,6 @@ func (h *InterviewHandler) Delete(c *gin.Context) {
 		switch err {
 		case services.ErrInterviewNotFound:
 			utils.NotFound(c, err.Error())
-		case services.ErrInterviewNotDeletable:
-			utils.Conflict(c, err.Error())
 		default:
 			utils.InternalError(c, err.Error())
 		}

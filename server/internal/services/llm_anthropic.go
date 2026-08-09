@@ -65,6 +65,7 @@ func toAnthropicRequest(reqBody chatRequest) anthropicRequest {
 		Temperature: reqBody.Temperature,
 		MaxTokens:   reqBody.MaxTokens,
 		Stream:      reqBody.Stream,
+		Thinking:    &anthropicThinking{Type: "disabled"},
 	}
 }
 

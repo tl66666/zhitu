@@ -91,7 +91,6 @@
                       <button
                         class="delete-btn"
                         title="删除该面试记录"
-                        :disabled="isInProgress(record.status)"
                         @click="handleDelete(record)"
                       >
                         <DeleteOutlined :style="{ fontSize: '14px' }" />
@@ -224,11 +223,6 @@ const goNew = () => {
 // 进入面试房间
 const enterRoom = (id: number) => {
   router.push(`/app/interviews/${id}`)
-}
-
-// 进行中的面试不允许删除（starting/ongoing/reviewing）
-const isInProgress = (status: string): boolean => {
-  return status === 'starting' || status === 'ongoing' || status === 'reviewing'
 }
 
 // 删除面试记录（二次确认）
@@ -557,19 +551,14 @@ onMounted(() => {
   flex-shrink: 0;
 }
 
-.delete-btn:hover:not(:disabled) {
+.delete-btn:hover {
   color: var(--state-error);
   border-color: var(--state-error);
   background: var(--state-error-surface);
 }
 
-.delete-btn:active:not(:disabled) {
+.delete-btn:active {
   opacity: 0.85;
-}
-
-.delete-btn:disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
 }
 
 /* 进行中状态脉动动画 */

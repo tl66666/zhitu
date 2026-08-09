@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/zhitu/server/internal/models"
 )
@@ -19,6 +20,8 @@ const (
 	maxCopilotMessageRunes      = 4000
 	maxCopilotJDRunes           = 30000
 	maxCopilotContentRunes      = 50000
+	copilotReplyChunkRunes      = 24
+	copilotReplyChunkDelay      = 10 * time.Millisecond
 )
 
 var (
@@ -188,7 +191,7 @@ func (s *ResumeCopilotService) ChatStream(ctx context.Context, userID uint, in *
 			return
 		}
 		if visible := replyStream.Push(raw.String()); visible != "" {
-			onDelta(visible)
+			emitCopilotReply(ctx, visible, onDelta)
 		}
 	})
 	if err != nil {
@@ -204,6 +207,32 @@ func (s *ResumeCopilotService) ChatStream(ctx context.Context, userID uint, in *
 		generated = *retryGenerated
 	}
 	return buildCopilotResponse(in, contextData, &generated), nil
+}
+
+func emitCopilotReply(ctx context.Context, value string, onDelta func(string)) {
+	if onDelta == nil || value == "" {
+		return
+	}
+	runes := []rune(value)
+	for start := 0; start < len(runes); start += copilotReplyChunkRunes {
+		end := start + copilotReplyChunkRunes
+		if end > len(runes) {
+			end = len(runes)
+		}
+		onDelta(string(runes[start:end]))
+		if end == len(runes) {
+			return
+		}
+		timer := time.NewTimer(copilotReplyChunkDelay)
+		select {
+		case <-ctx.Done():
+			if !timer.Stop() {
+				<-timer.C
+			}
+			return
+		case <-timer.C:
+		}
+	}
 }
 
 func (s *ResumeCopilotService) prepareChat(userID uint, in *CopilotInput) (*resumeCopilotContext, []ChatMessage, error) {
