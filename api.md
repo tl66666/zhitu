@@ -15,12 +15,13 @@
 2. [认证模块 /api/auth](#2-认证模块-apiauth)
 3. [用户档案模块 /api/v1/profile](#3-用户档案模块-apiv1profile)
 4. [简历模块 /api/v1/resumes](#4-简历模块-apiv1resumes)
-5. [模拟面试模块 /api/v1/interviews](#5-模拟面试模块-apiv1interviews)
-6. [投递看板模块 /api/v1/deliveries](#6-投递看板模块-apiv1deliveries)
-7. [管理端模块 /api/admin](#7-管理端模块-apiadmin)
-8. [静态资源与文件上传](#8-静态资源与文件上传)
-9. [枚举值速查表](#9-枚举值速查表)
-10. [注意事项](#10-注意事项)
+5. [浏览器工作区状态 /api/v1/browser-state](#5-浏览器工作区状态-apiv1browser-state)
+6. [模拟面试模块 /api/v1/interviews](#6-模拟面试模块-apiv1interviews)
+7. [投递看板模块 /api/v1/deliveries](#7-投递看板模块-apiv1deliveries)
+8. [管理端模块 /api/admin](#8-管理端模块-apiadmin)
+9. [静态资源与文件上传](#9-静态资源与文件上传)
+10. [枚举值速查表](#10-枚举值速查表)
+11. [注意事项](#11-注意事项)
 
 ---
 
@@ -730,11 +731,56 @@ POST /api/v1/copilot/apply
 
 ---
 
-## 5. 模拟面试模块 /api/v1/interviews
+## 5. 浏览器工作区状态 /api/v1/browser-state
+
+浏览器工作区隔离机制的底层存储接口。通过 `X-Browser-Token` 的 SHA-256 哈希映射 `workspace_id`，每个浏览器实例拥有独立的状态空间。前端用于持久化 Copilot 会话 ID 等浏览器级状态。
+
+### 5.1 获取状态
+
+```
+GET /api/v1/browser-state/:key
+```
+
+**响应 data**
+
+```json
+{"key": "copilot_session", "value": {/* 任意 JSON */}}
+```
+
+- key 不存在时返回 `40401`
+
+### 5.2 保存状态
+
+```
+PUT /api/v1/browser-state/:key
+```
+
+**请求体**
+
+```json
+{"value": {/* 任意 JSON */}}
+```
+
+- value 大小限制 64KB
+- key 长度限制 1-128 字符
+
+**响应 data**：`{"key": "copilot_session"}`
+
+### 5.3 删除状态
+
+```
+DELETE /api/v1/browser-state/:key
+```
+
+**响应 data**：`{"key": "copilot_session"}`
+
+---
+
+## 6. 模拟面试模块 /api/v1/interviews
 
 所有接口需登录。支持文字/语音/混合模式，AI 自动发问，结束后生成复盘报告。
 
-### 5.1 创建面试会话
+### 6.1 创建面试会话
 
 ```
 POST /api/v1/interviews
@@ -769,7 +815,7 @@ POST /api/v1/interviews
 
 ---
 
-### 5.2 启动面试并生成首题（SSE）
+### 6.2 启动面试并生成首题（SSE）
 
 ```
 POST /api/v1/interviews/:id/start
@@ -787,7 +833,7 @@ POST /api/v1/interviews/:id/start
 
 首题 Prompt 同时包含创建时固化的 JD、简历快照和训练设置。
 
-### 5.3 切换面试模式
+### 6.3 切换面试模式
 
 ```
 PATCH /api/v1/interviews/:id/mode
@@ -797,7 +843,7 @@ PATCH /api/v1/interviews/:id/mode
 
 可在 `preparing` 或 `ongoing` 状态下自由切换 `text / voice / hybrid`，不会重置已有对话。
 
-### 5.4 列表
+### 6.4 列表
 
 ```
 GET /api/v1/interviews
@@ -807,7 +853,7 @@ GET /api/v1/interviews
 
 ---
 
-### 5.5 获取面试详情
+### 6.5 获取面试详情
 
 ```
 GET /api/v1/interviews/:id
@@ -824,7 +870,7 @@ GET /api/v1/interviews/:id
 
 ---
 
-### 5.6 发送文字回答（SSE 流式）
+### 6.6 发送文字回答（SSE 流式）
 
 ```
 POST /api/v1/interviews/:id/messages
@@ -854,7 +900,7 @@ POST /api/v1/interviews/:id/messages
 
 ---
 
-### 5.7 发送语音回答（SSE 流式）
+### 6.7 发送语音回答（SSE 流式）
 
 ```
 POST /api/v1/interviews/:id/voice
@@ -884,7 +930,7 @@ POST /api/v1/interviews/:id/voice
 
 ---
 
-### 5.8 获取 AI 提问的 TTS 音频
+### 6.8 获取 AI 提问的 TTS 音频
 
 ```
 GET /api/v1/interviews/:id/tts/:msgId
@@ -904,7 +950,7 @@ Content-Disposition: inline; filename="tts_xxx.wav"
 
 ---
 
-### 5.9 结束面试并生成复盘
+### 6.9 结束面试并生成复盘
 
 ```
 POST /api/v1/interviews/:id/end
@@ -917,7 +963,7 @@ POST /api/v1/interviews/:id/end
 
 ---
 
-### 5.10 获取复盘报告
+### 6.10 获取复盘报告
 
 ```
 GET /api/v1/interviews/:id/report
@@ -927,7 +973,7 @@ GET /api/v1/interviews/:id/report
 
 ---
 
-### 5.11 获取评分明细
+### 6.11 获取评分明细
 
 ```
 GET /api/v1/interviews/:id/scores
@@ -937,11 +983,113 @@ GET /api/v1/interviews/:id/scores
 
 ---
 
-## 6. 投递看板模块 /api/v1/deliveries
+### 6.12 取消面试
+
+```
+POST /api/v1/interviews/:id/cancel
+```
+
+取消仍在候场（`preparing`/`starting`）的面试会话，状态置为 `cancelled`。
+
+- 仅未开始的面试可取消；已进行中或已结束的面试返回 `40901` 冲突
+
+**响应 data**：更新后的 interview 对象。
+
+**错误**
+
+| code  | message |
+|-------|---------|
+| 40401 | interview not found |
+| 40901 | only an interview waiting to start can be cancelled |
+
+---
+
+### 6.13 删除面试记录
+
+```
+DELETE /api/v1/interviews/:id
+```
+
+删除一条面试记录，事务级联清除关联的消息、评分和复盘报告。支持删除任意状态的面试记录。
+
+**响应 data**
+
+```json
+{"id": 1}
+```
+
+**错误**：面试不存在返回 `40401 interview not found`。
+
+---
+
+### 6.14 关联简历
+
+```
+POST /api/v1/interviews/:id/resume
+```
+
+将指定简历版本的快照写入面试会话，AI 在后续提问中会结合简历内容。
+
+**请求体**
+
+```json
+{
+  "resume_id": 12,
+  "version_id": 34
+}
+```
+
+| 字段         | 类型 | 必填 | 说明 |
+|-------------|------|------|------|
+| resume_id   | int  | 是   | 简历 ID |
+| version_id  | int  | 否   | 简历版本 ID，缺省取当前版本 |
+
+**响应 data**：更新后的 interview 对象。
+
+**错误**
+
+| code  | message |
+|-------|---------|
+| 40401 | interview not found / resume not found / resume version not found |
+| 40001 | interview already ended, cannot attach resume |
+| 40901 | resume is locked for this interview |
+
+---
+
+### 6.15 语音转写草稿
+
+```
+POST /api/v1/interviews/:id/transcribe
+```
+
+仅将语音转写为文字，不创建面试回答、不增加题号、不生成下一题。用于语音模式下用户录音后先展示文字草稿，确认后再提交。
+
+**请求**：`multipart/form-data`
+
+| 字段         | 类型 | 必填 | 校验规则 |
+|-------------|------|------|---------|
+| audio       | file | 是   | `.mp3`/`.wav`，≤7MB（MiMo ASR 限制） |
+
+**响应 data**
+
+```json
+{"text": "转写出的文字内容"}
+```
+
+**错误**
+
+| code  | message |
+|-------|---------|
+| 40401 | interview not found |
+| 40901 | interview already ended |
+
+---
+
+## 7. 投递看板模块 /api/v1/deliveries
 
 所有接口需登录。投递看板管理求职进度，含面试轮次与 HR 反馈。
 
-### 6.1 投递主表
+### 7.1 投递主表
 
 #### 列表
 
@@ -1038,7 +1186,7 @@ rejected → interview （复活）
 
 ---
 
-### 6.2 面试轮次
+### 7.2 面试轮次
 
 #### 列表
 
@@ -1083,7 +1231,7 @@ DELETE /api/v1/deliveries/:id/rounds/:rid
 
 ---
 
-### 6.3 HR 反馈
+### 7.3 HR 反馈
 
 #### 列表
 
@@ -1109,7 +1257,7 @@ DELETE /api/v1/deliveries/:id/feedbacks/:fid
 
 ---
 
-### 6.4 统计与漏斗
+### 7.4 统计与漏斗
 
 #### 统计
 
@@ -1131,11 +1279,11 @@ GET /api/v1/deliveries/funnel
 
 ---
 
-## 7. 管理端模块 /api/admin
+## 8. 管理端模块 /api/admin
 
 所有接口需**管理员 token**（`is_admin=true`），普通用户 token 返回 `40301 admin only`。
 
-### 7.1 仪表盘统计
+### 8.1 仪表盘统计
 
 ```
 GET /api/admin/stats
@@ -1145,7 +1293,7 @@ GET /api/admin/stats
 
 ---
 
-### 7.2 用户管理
+### 8.2 用户管理
 
 #### 用户列表
 
@@ -1200,7 +1348,7 @@ POST /api/admin/users/:id/reset-password
 
 ---
 
-### 7.3 投递管理
+### 8.3 投递管理
 
 #### 全局投递列表
 
@@ -1226,9 +1374,9 @@ GET /api/admin/deliveries/funnel
 
 ---
 
-## 8. 静态资源与文件上传
+## 9. 静态资源与文件上传
 
-### 8.1 静态文件服务
+### 9.1 静态文件服务
 
 ```
 GET /static/*
@@ -1238,7 +1386,7 @@ GET /static/*
 - 用于访问上传的音频、TTS、简历文件
 - 目录结构：`{base_dir}/{audio,tts,resume}/...`
 
-### 8.2 文件上传限制
+### 9.2 文件上传限制
 
 | 场景           | 接口                            | 允许扩展名                    | 大小限制 |
 |---------------|---------------------------------|------------------------------|---------|
@@ -1247,9 +1395,9 @@ GET /static/*
 
 ---
 
-## 9. 枚举值速查表
+## 10. 枚举值速查表
 
-### 9.1 投递状态（Delivery.status）
+### 10.1 投递状态（Delivery.status）
 
 | 值             | 含义     |
 |----------------|---------|
@@ -1260,7 +1408,7 @@ GET /static/*
 | offer          | 已 Offer |
 | rejected       | 已拒绝   |
 
-### 9.2 投递渠道（Delivery.channel）
+### 10.2 投递渠道（Delivery.channel）
 
 | 值        | 含义     |
 |----------|---------|
@@ -1271,7 +1419,7 @@ GET /static/*
 | headhunt | 猎头     |
 | other    | 其他     |
 
-### 9.3 投递优先级（Delivery.priority）
+### 10.3 投递优先级（Delivery.priority）
 
 | 值     | 含义 |
 |-------|-----|
@@ -1279,7 +1427,7 @@ GET /static/*
 | medium| 中   |
 | low   | 低   |
 
-### 9.4 面试轮次类型（DeliveryRound.round_type）
+### 10.4 面试轮次类型（DeliveryRound.round_type）
 
 | 值            | 含义       |
 |--------------|-----------|
@@ -1292,7 +1440,7 @@ GET /static/*
 | additional   | 加面       |
 | final        | 终面       |
 
-### 9.5 面试形式（DeliveryRound.format）
+### 10.5 面试形式（DeliveryRound.format）
 
 | 值      | 含义   |
 |--------|--------|
@@ -1300,7 +1448,7 @@ GET /static/*
 | video  | 视频   |
 | phone  | 电话   |
 
-### 9.6 轮次结果（DeliveryRound.result）
+### 10.6 轮次结果（DeliveryRound.result）
 
 | 值       | 含义   |
 |---------|--------|
@@ -1308,7 +1456,7 @@ GET /static/*
 | pending | 待定   |
 | rejected| 淘汰   |
 
-### 9.7 模拟面试场景（Interview.scene）
+### 10.7 模拟面试场景（Interview.scene）
 
 | 值        | 含义   |
 |----------|--------|
@@ -1318,7 +1466,7 @@ GET /static/*
 | hr       | HR 面  |
 | group    | 群面   |
 
-### 9.8 模拟面试模式（Interview.mode）
+### 10.8 模拟面试模式（Interview.mode）
 
 | 值     | 含义                  |
 |-------|----------------------|
@@ -1326,7 +1474,7 @@ GET /static/*
 | voice | 语音                 |
 | hybrid| 系统语音 + 用户文字   |
 
-### 9.9 面试状态（Interview.status）
+### 10.9 面试状态（Interview.status）
 
 | 值         | 含义   |
 |-----------|--------|
@@ -1334,14 +1482,14 @@ GET /static/*
 | completed | 已完成 |
 | cancelled | 已取消 |
 
-### 9.10 用户状态（User.status）
+### 10.10 用户状态（User.status）
 
 | 值       | 含义   |
 |---------|--------|
 | active  | 正常   |
 | disabled| 禁用   |
 
-### 9.11 简历场景（Resume.scene）
+### 10.11 简历场景（Resume.scene）
 
 | 值       | 含义       |
 |---------|-----------|
@@ -1351,26 +1499,26 @@ GET /static/*
 
 ---
 
-## 10. 注意事项
+## 11. 注意事项
 
-### 10.1 路由前缀
+### 11.1 路由前缀
 
 - **认证模块路径为 `/api/auth/*`，不带 v1**。业务模块才是 `/api/v1/*`。前端常因写成 `/api/v1/auth/login` 导致 404。
 - 管理端路径为 `/api/admin/*`，需管理员 token。
 
-### 10.2 JWT 双密钥隔离
+### 11.2 JWT 双密钥隔离
 
 - 普通用户 JWT 使用 `jwt.secret` 签名
 - 管理员 JWT 使用 `jwt.admin_secret` 签名
 - 两者互不混用，前端应使用独立的 localStorage 键名存储（如 `zhitu-auth` 与 `zhitu-admin-auth`）
 
-### 10.3 登录响应只返回 token
+### 11.3 登录响应只返回 token
 
 - `/api/auth/login` 和 `/api/auth/admin/login` **只返回 token**，不返回 user 详情
 - 获取用户信息需调用 `GET /api/auth/me`
 - 前端登录成功后建议异步调用 `/api/auth/me` 拉取真实用户信息
 
-### 10.4 SSE 流式接口
+### 11.4 SSE 流式接口
 
 以下接口返回 SSE 流，需用 `EventSource` 或 `fetch` + `ReadableStream` 接收：
 
@@ -1388,7 +1536,7 @@ GET /static/*
 | interview_ended   | 面试自动结束             |
 | error             | 错误                     |
 
-### 10.5 AI 接口依赖 LLM 配置
+### 11.5 AI 接口依赖 LLM 配置
 
 所有 AI 相关接口（简历生成/润色/评分/JD 匹配、面试发问/转写/TTS、简历解析）均依赖 `config.yaml` 中的 `llm` 配置：
 
@@ -1405,35 +1553,35 @@ llm:
 - 未配置 `api_key` 时，AI 接口返回 500 错误，提示 "llm not configured"
 - **服务启动不依赖 LLM**，未配置时业务模块仍可正常注册路由、启动服务，仅 AI 接口报错
 
-### 10.6 路由参数顺序
+### 11.6 路由参数顺序
 
 `/api/v1/deliveries` 下，`/stats` 和 `/funnel` 必须注册在 `/:id` 之前，否则会被 Gin 当作 `:id` 匹配导致 404。后端已正确处理，前端调用时注意路径不要冲突。
 
-### 10.7 子资源更新为 map 模式
+### 11.7 子资源更新为 map 模式
 
 用户档案子资源的 `PUT` 接口接收 `map[string]interface{}`，可传任意字段子集进行局部更新，无需传完整对象。
 
-### 10.8 文件上传字段名
+### 11.8 文件上传字段名
 
 | 接口                            | 字段名 |
 |---------------------------------|--------|
 | POST /api/v1/profile/parse-resume | file   |
 | POST /api/v1/interviews/:id/voice | audio  |
 
-### 10.9 分页参数
+### 11.9 分页参数
 
 仅管理端用户列表与投递列表支持分页（`page` / `page_size`）。业务模块列表接口（简历、面试、投递、档案子资源）均**无分页**，返回当前用户全量数据。
 
-### 10.10 用户隔离
+### 11.10 用户隔离
 
 - 业务模块接口均按 JWT 中的 `user_id` 过滤数据，用户只能访问自己的数据
 - 管理端接口可访问全部用户数据，但需管理员身份
 
-### 10.11 静态文件
+### 11.11 静态文件
 
 上传的文件存储在 `config.storage.base_dir` 下，通过 `/static/*` 访问。生产环境建议配置 Nginx 直接托管静态文件，减轻后端压力。
 
-### 10.12 健康检查
+### 11.12 健康检查
 
 ```
 GET /health

@@ -100,7 +100,7 @@ go run ./cmd/server
 cd web
 npm install
 npm run dev
-# 默认监听 :5173，自动打开浏览器
+# 默认监听 :3000，自动打开浏览器
 # 开发模式下 /api 请求代理到后端 :8080
 ```
 
