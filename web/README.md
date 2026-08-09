@@ -78,7 +78,7 @@ npm install
 ### 3. 常用命令
 
 ```bash
-npm run dev          # 开发模式，默认 :5173，自动打开浏览器
+npm run dev          # 开发模式，默认 :3000，自动打开浏览器
 npm run check        # TypeScript 类型检查
 npm run build        # 生产构建
 npm run preview      # 预览生产构建
