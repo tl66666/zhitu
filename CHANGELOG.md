@@ -6,6 +6,14 @@
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-08-09
+
+### PR #12 (commit 93e20a7)
+
+#### 变更
+- Copilot 流式响应优化：`emitCopilotReply` 按 rune 分块推送，避免长文本一次性输出造成卡顿
+- 面试删除取消状态限制：允许删除任意状态的面试记录（此前仅允许 `completed`/`cancelled` 状态删除）
+
 ## [0.5.0] - 2026-08-05
 
 ### PR #11 (commit d08e226)
