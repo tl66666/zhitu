@@ -6,6 +6,18 @@
 
 ## [Unreleased]
 
+## [0.6.1] - 2026-08-09
+
+### PR #14 (commit aa72f68)
+
+#### 变更
+- `.gitignore` 新增 `*.docx` 忽略规则
+- `CONTRIBUTING.md` 修正 commit 示例（移除不存在的 GitHub OAuth 引用），功能拆分表更新为实际产品模块
+- `server/README.md` 补充面试路由缺失文档（DELETE/start/mode/cancel），标注 SSE 端点
+- `server/configs/config.example.yaml` 移除过时的 5173 端口引用
+- `web/README.md` 修正 API 代理端口说明 5173 → 3000
+- `web/vite.config.ts` 补充 `open: true` 配置，启动时自动打开浏览器
+
 ## [0.6.0] - 2026-08-09
 
 ### PR #12 (commit 93e20a7)
