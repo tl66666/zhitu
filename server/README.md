@@ -217,13 +217,16 @@ HTTP Request
 | 方法 | 路径 | 说明 |
 |---|---|---|
 | GET / POST | `/api/v1/interviews` | 列表 / 创建 |
-| GET | `/api/v1/interviews/:id` | 详情 |
+| GET / DELETE | `/api/v1/interviews/:id` | 详情 / 删除 |
+| POST | `/api/v1/interviews/:id/start` | 启动面试并生成首题（SSE） |
+| PATCH | `/api/v1/interviews/:id/mode` | 切换交互模式 |
 | POST | `/api/v1/interviews/:id/resume` | 关联简历 |
-| POST | `/api/v1/interviews/:id/messages` | 发送文字消息 |
-| POST | `/api/v1/interviews/:id/transcribe` | 语音转文字 |
-| POST | `/api/v1/interviews/:id/voice` | 发送语音回答 |
+| POST | `/api/v1/interviews/:id/messages` | 发送文字消息（SSE） |
+| POST | `/api/v1/interviews/:id/transcribe` | 语音转文字草稿 |
+| POST | `/api/v1/interviews/:id/voice` | 发送语音回答（SSE） |
 | GET | `/api/v1/interviews/:id/tts/:msgId` | 获取 TTS 音频 |
 | POST | `/api/v1/interviews/:id/end` | 结束面试 |
+| POST | `/api/v1/interviews/:id/cancel` | 取消面试 |
 | GET | `/api/v1/interviews/:id/report` | 复盘报告 |
 | GET | `/api/v1/interviews/:id/scores` | 多维评分 |
 

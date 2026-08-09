@@ -8,9 +8,8 @@ server:
   mode: debug
   # 跨域允许的来源，留空表示允许全部
   allow_origins:
-    - "http://localhost:5173"
     - "http://localhost:3000"
-    - "http://127.0.0.1:5173"
+    - "http://127.0.0.1:3000"
 
 database:
   # 数据库文件路径（相对于 server 目录）
